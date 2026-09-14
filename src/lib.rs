@@ -8,6 +8,7 @@
 //! Fixed first-phase Rust style checks used by Qubit Rust projects.
 
 mod style_checker;
+mod style_exceptions;
 
 pub use style_checker::Diagnostic;
 pub use style_checker::check;

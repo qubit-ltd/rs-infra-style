@@ -30,6 +30,22 @@ and `align-ci.sh` wrappers can call these two stable subcommands directly.
 
 The project's `.infra` configuration remains the source of truth; this tool does not copy project configuration into the tool repository.
 
+Projects may define reviewed, path-scoped exceptions in
+`.infra/style/exceptions.toml`:
+
+```toml
+format = 1
+
+[[exceptions]]
+rule = "test-redirect"
+path = "tests/legacy_tests.rs"
+reason = "The legacy implementation is intentionally shared."
+```
+
+Each exception must name a supported rule, an exact project-relative path, and
+a non-empty reason. Glob patterns, global exemptions, and source-code allow
+comments are not supported.
+
 ## Capabilities and limitations
 
 This first release provides the focused behavior described above. It is intentionally a small building block: project-specific policy belongs in `.infra`, and orchestration belongs in `rs-infra-ci`. It does not promise compatibility with the legacy `rs-ci` scripts beyond the commands currently covered by tests.

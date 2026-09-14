@@ -29,6 +29,20 @@ cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . fix
 
 项目的 `.infra` 配置仍然是行为的唯一来源；工具仓库不会复制项目配置。具体策略由项目配置决定。
 
+项目可以在 `.infra/style/exceptions.toml` 中声明经过审查、绑定到具体路径的例外：
+
+```toml
+format = 1
+
+[[exceptions]]
+rule = "test-redirect"
+path = "tests/legacy_tests.rs"
+reason = "该历史实现需要有意共享。"
+```
+
+每条例外都必须指定受支持的规则、相对于项目根目录的精确路径以及非空原因。
+不支持 glob、全局豁免或源码内 allow 注释。
+
 ## 能力与限制
 
 当前版本只提供上文列出的专门能力，刻意保持为小型基础设施组件：项目策略放在 `.infra`，任务编排交给 `rs-infra-ci`。对于旧版 `rs-ci` 脚本，只有测试覆盖的命令可视为兼容。
