@@ -2,23 +2,44 @@
 //! Fixed first-phase Rust style checks used by Qubit Rust projects.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use syn::{Item, Visibility};
 use walkdir::WalkDir;
 
 /// A machine-readable style diagnostic.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Diagnostic {
+    /// Version of the serialized diagnostic schema.
     pub schema_version: u8,
+    /// Stable rule identifier, such as `STYLE004`.
     pub code: String,
+    /// Diagnostic severity, currently `error`.
     pub severity: String,
+    /// Project-relative source path.
     pub path: String,
+    /// One-based source line, or zero for file-level diagnostics.
     pub line: usize,
+    /// Human-readable explanation of the violation.
     pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoMetadata {
+    packages: Vec<CargoPackage>,
+    #[serde(default)]
+    workspace_default_members: Vec<String>,
+    #[serde(default)]
+    workspace_members: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoPackage {
+    id: String,
+    manifest_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,20 +48,32 @@ enum RootKind {
     Tests,
 }
 
+/// Checks the configured source and test trees without invoking rustfmt.
+///
+/// When no directories are supplied, Cargo workspace default members are
+/// discovered and each package's `src`, `src/tests`, and `tests` trees are
+/// checked. Supplying either directory selects the legacy explicit-directory
+/// mode and derives crate-internal tests from the selected source directory.
+/// Filesystem or Cargo metadata errors are returned as `Err`.
 pub fn check(
     project: &Path,
     source_dir: Option<&Path>,
     test_dir: Option<&Path>,
 ) -> Result<Vec<Diagnostic>> {
-    let source = source_dir
-        .map(|path| project.join(path))
-        .unwrap_or_else(|| project.join("src"));
-    let tests = test_dir
-        .map(|path| project.join(path))
-        .unwrap_or_else(|| project.join("tests"));
     let mut diagnostics = Vec::new();
-    check_root(project, &source, RootKind::Source, &mut diagnostics)?;
-    check_root(project, &tests, RootKind::Tests, &mut diagnostics)?;
+    let roots = if source_dir.is_some() || test_dir.is_some() {
+        vec![(
+            project.join(source_dir.unwrap_or(Path::new("src"))),
+            project.join(test_dir.unwrap_or(Path::new("tests"))),
+        )]
+    } else if project.join("Cargo.toml").is_file() {
+        workspace_roots(project)?
+    } else {
+        vec![(project.join("src"), project.join("tests"))]
+    };
+    for (source, tests) in roots {
+        check_package_roots(project, &source, &tests, &mut diagnostics)?;
+    }
     Ok(diagnostics)
 }
 
@@ -58,6 +91,10 @@ pub fn check_project(
     check(project, source_dir, test_dir)
 }
 
+/// Prints style diagnostics as text or pretty JSON.
+///
+/// JSON serialization errors are returned as `Err`; text output is written to
+/// standard output and does not itself fail.
 pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(diagnostics)?);
@@ -84,17 +121,108 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Formats a project and validates its default workspace style rules.
+///
+/// This compatibility wrapper uses workspace discovery. Use
+/// [`fix_project`] when a migration or caller supplies explicit source/test
+/// directories.
 pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
+    fix_project(project, None, None, dry_run)
+}
+
+/// Formats a project and validates the selected style roots.
+///
+/// The `source_dir` and `test_dir` values are interpreted relative to
+/// `project`, matching the CLI options. In dry-run mode no files are changed
+/// and the rustfmt command is printed instead. Errors from Cargo, rustfmt, or
+/// the style checks are returned as `Err`.
+pub fn fix_project(
+    project: &Path,
+    source_dir: Option<&Path>,
+    test_dir: Option<&Path>,
+    dry_run: bool,
+) -> Result<()> {
     if dry_run {
         println!("cargo fmt --all");
         return Ok(());
     }
     run_cargo_fmt(project, false)?;
-    let diagnostics = check(project, None, None)?;
+    let diagnostics = check(project, source_dir, test_dir)?;
     if !diagnostics.is_empty() {
         anyhow::bail!("style checks still report {} issue(s)", diagnostics.len());
     }
     Ok(())
+}
+
+fn check_package_roots(
+    project: &Path,
+    source: &Path,
+    tests: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<()> {
+    check_root(project, source, RootKind::Source, diagnostics)?;
+    let internal_tests = source.join("tests");
+    if internal_tests.is_dir() {
+        check_internal_test_module(project, source, diagnostics);
+        check_root(project, &internal_tests, RootKind::Tests, diagnostics)?;
+    }
+    if tests != internal_tests {
+        check_root(project, tests, RootKind::Tests, diagnostics)?;
+    }
+    Ok(())
+}
+
+fn workspace_roots(project: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .current_dir(project)
+        .output()
+        .context("failed to start cargo metadata")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "cargo metadata failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let metadata: CargoMetadata =
+        serde_json::from_slice(&output.stdout).context("failed to parse cargo metadata output")?;
+    let selected_ids = if metadata.workspace_default_members.is_empty() {
+        &metadata.workspace_members
+    } else {
+        &metadata.workspace_default_members
+    };
+    let packages = metadata
+        .packages
+        .into_iter()
+        .filter(|package| selected_ids.is_empty() || selected_ids.contains(&package.id))
+        .filter_map(|package| {
+            let package_root = package.manifest_path.parent()?;
+            Some((package_root.join("src"), package_root.join("tests")))
+        })
+        .collect();
+    Ok(packages)
+}
+
+fn check_internal_test_module(project: &Path, source: &Path, diagnostics: &mut Vec<Diagnostic>) {
+    let internal_tests = source.join("tests");
+    let has_module = [source.join("lib.rs"), source.join("main.rs")]
+        .iter()
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .any(|text| text.contains("#[cfg(test)]") && text.contains("mod tests"));
+    if !has_module {
+        let relative = internal_tests
+            .strip_prefix(project)
+            .unwrap_or(internal_tests.as_path())
+            .display()
+            .to_string();
+        add(
+            diagnostics,
+            "STYLE012",
+            &relative,
+            0,
+            "src/tests must be connected from the crate root with #[cfg(test)] mod tests;",
+        );
+    }
 }
 
 fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
@@ -129,6 +257,15 @@ fn check_root(
     }
     for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
         let path = entry.path();
+        if kind == RootKind::Source
+            && path
+                .strip_prefix(root)
+                .ok()
+                .and_then(|relative| relative.components().next())
+                .is_some_and(|component| component.as_os_str() == "tests")
+        {
+            continue;
+        }
         if !entry.file_type().is_file()
             || path.extension().and_then(|value| value.to_str()) != Some("rs")
         {
@@ -465,5 +602,71 @@ mod tests {
         let result = check_project(directory.path(), None, None);
 
         assert!(result.is_err(), "unformatted Rust must fail project check");
+    }
+
+    #[test]
+    fn workspace_check_includes_crate_internal_tests() {
+        let directory = tempfile::tempdir().expect("temporary workspace");
+        fs::create_dir_all(directory.path().join("crate/src/tests")).expect("source directories");
+        fs::write(
+            directory.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crate\"]\nresolver = \"3\"\n",
+        )
+        .expect("workspace manifest");
+        fs::write(
+            directory.path().join("crate/Cargo.toml"),
+            "[package]\nname = \"crate\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("package manifest");
+        fs::write(
+            directory.path().join("crate/src/lib.rs"),
+            "#[cfg(test)] mod tests;\n",
+        )
+        .expect("crate root");
+        fs::write(
+            directory.path().join("crate/src/tests/redirect.rs"),
+            "include!(\"fixture.rs\");\n",
+        )
+        .expect("internal test");
+
+        let diagnostics = check(directory.path(), None, None).expect("style check");
+
+        assert!(
+            diagnostics.iter().any(|item| {
+                item.code == "STYLE002" && item.path == "crate/src/tests/redirect.rs"
+            })
+        );
+    }
+
+    #[test]
+    fn fix_project_honors_explicit_source_and_test_directories() {
+        let directory = tempfile::tempdir().expect("temporary project");
+        fs::create_dir_all(directory.path().join("custom-src")).expect("source directory");
+        fs::create_dir_all(directory.path().join("custom-tests")).expect("test directory");
+        fs::write(
+            directory.path().join("Cargo.toml"),
+            "[package]\nname = \"custom-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("manifest");
+        fs::create_dir_all(directory.path().join("src")).expect("Cargo source directory");
+        fs::write(
+            directory.path().join("src/lib.rs"),
+            "pub fn value() -> i32 { 1 }\n",
+        )
+        .expect("Cargo source");
+        fs::write(
+            directory.path().join("custom-src/wrong.rs"),
+            "use std::*;\n",
+        )
+        .expect("custom source");
+
+        let result = fix_project(
+            directory.path(),
+            Some(Path::new("custom-src")),
+            Some(Path::new("custom-tests")),
+            false,
+        );
+
+        assert!(result.is_err(), "custom source violations must be checked");
     }
 }

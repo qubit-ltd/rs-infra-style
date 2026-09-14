@@ -52,6 +52,11 @@ fn main() -> Result<()> {
                 std::process::exit(1)
             }
         }
-        Command::Fix { dry_run } => qubit_infra_style::fix(&project, dry_run),
+        Command::Fix { dry_run } => qubit_infra_style::fix_project(
+            &project,
+            cli.source_dir.as_deref(),
+            cli.test_dir.as_deref(),
+            dry_run,
+        ),
     }
 }
