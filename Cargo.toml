@@ -1,0 +1,25 @@
+[package]
+name = "qubit-infra-style"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+description = "Rust source style checks and safe corrections for Qubit projects"
+repository = "https://github.com/qubit-ltd/rs-infra-style"
+homepage = "https://qubit-ltd.github.io/rs-infra-style/"
+readme = "README.md"
+
+[[bin]]
+name = "rs-infra-style"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+syn = { version = "2", features = ["full", "parsing"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"
