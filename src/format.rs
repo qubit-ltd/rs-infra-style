@@ -5,13 +5,15 @@
 //
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
-//! Fixed first-phase Rust style checks used by Qubit Rust projects.
+//! Diagnostic output formats for the command-line interface.
 
-mod style_checker;
+use clap::ValueEnum;
 
-pub use style_checker::Diagnostic;
-pub use style_checker::check;
-pub use style_checker::check_project;
-pub use style_checker::fix;
-pub use style_checker::fix_project;
-pub use style_checker::print_diagnostics;
+/// Supported diagnostic output formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum Format {
+    /// Human-readable text output.
+    Text,
+    /// Pretty-printed JSON output.
+    Json,
+}

@@ -1,58 +1,41 @@
-use std::path::PathBuf;
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+//! Command-line entry point for the style checker.
+
+mod cli;
+mod command;
+mod format;
 
 use anyhow::Result;
 use clap::Parser;
-use clap::Subcommand;
-use clap::ValueEnum;
+use cli::Cli;
+use command::Command;
+use format::Format;
+use qubit_infra_style::check_project;
+use qubit_infra_style::fix_project;
+use qubit_infra_style::print_diagnostics;
 
-#[derive(Debug, Parser)]
-#[command(name = "rs-infra-style")]
-struct Cli {
-    #[arg(long, default_value = ".")]
-    project: PathBuf,
-    #[arg(long)]
-    source_dir: Option<PathBuf>,
-    #[arg(long)]
-    test_dir: Option<PathBuf>,
-    #[arg(long, value_enum, default_value_t = Format::Text)]
-    format: Format,
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum Format {
-    Text,
-    Json,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    Check,
-    Fix {
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
+/// Parses arguments and executes the requested style operation.
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let project = std::fs::canonicalize(&cli.project)?;
     match cli.command {
         Command::Check => {
-            let diagnostics = qubit_infra_style::check_project(
-                &project,
-                cli.source_dir.as_deref(),
-                cli.test_dir.as_deref(),
-            )?;
-            qubit_infra_style::print_diagnostics(&diagnostics, cli.format == Format::Json)?;
+            let diagnostics =
+                check_project(&project, cli.source_dir.as_deref(), cli.test_dir.as_deref())?;
+            print_diagnostics(&diagnostics, cli.format == Format::Json)?;
             if diagnostics.is_empty() {
                 Ok(())
             } else {
                 std::process::exit(1)
             }
         }
-        Command::Fix { dry_run } => qubit_infra_style::fix_project(
+        Command::Fix { dry_run } => fix_project(
             &project,
             cli.source_dir.as_deref(),
             cli.test_dir.as_deref(),
