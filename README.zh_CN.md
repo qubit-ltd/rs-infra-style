@@ -20,8 +20,12 @@ cargo install --git https://github.com/qubit-ltd/rs-infra-style.git --tag v0.1.0
 在 Rust 项目根目录查看命令帮助：
 
 ```bash
-cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --help
+cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . check
+cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . fix
 ```
+
+`check` 将 rustfmt 检查与固定项目风格规则合并执行；`fix` 执行 rustfmt
+后再验证固定规则。迁移生成的 `style-check.sh` 与 `align-ci.sh` 可以直接调用这两个稳定子命令。
 
 项目的 `.infra` 配置仍然是行为的唯一来源；工具仓库不会复制项目配置。具体策略由项目配置决定。
 

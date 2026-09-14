@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     let project = std::fs::canonicalize(&cli.project)?;
     match cli.command {
         Command::Check => {
-            let diagnostics = qubit_infra_style::check(
+            let diagnostics = qubit_infra_style::check_project(
                 &project,
                 cli.source_dir.as_deref(),
                 cli.test_dir.as_deref(),

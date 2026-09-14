@@ -44,6 +44,20 @@ pub fn check(
     Ok(diagnostics)
 }
 
+/// Runs rustfmt in check mode and then evaluates the fixed project style rules.
+///
+/// The rustfmt subprocess runs in `project` and returns an error when the
+/// project is not formatted or Cargo/rustfmt cannot be started. Custom style
+/// diagnostics are returned only after rustfmt succeeds.
+pub fn check_project(
+    project: &Path,
+    source_dir: Option<&Path>,
+    test_dir: Option<&Path>,
+) -> Result<Vec<Diagnostic>> {
+    run_cargo_fmt(project, true)?;
+    check(project, source_dir, test_dir)
+}
+
 pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(diagnostics)?);
@@ -71,38 +85,35 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
 }
 
 pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
-    let commands = [
-        ("cargo", vec!["fmt", "--all"]),
-        (
-            "cargo",
-            vec![
-                "clippy",
-                "--fix",
-                "--workspace",
-                "--allow-dirty",
-                "--allow-staged",
-                "--all-targets",
-                "--all-features",
-            ],
-        ),
-    ];
-    for (program, args) in commands {
-        if dry_run {
-            println!("{} {}", program, args.join(" "));
-            continue;
-        }
-        let status = Command::new(program)
-            .args(&args)
-            .current_dir(project)
-            .status()
-            .with_context(|| format!("failed to start {program}"))?;
-        if !status.success() {
-            anyhow::bail!("{program} {} failed", args.join(" "));
-        }
+    if dry_run {
+        println!("cargo fmt --all");
+        return Ok(());
     }
+    run_cargo_fmt(project, false)?;
     let diagnostics = check(project, None, None)?;
     if !diagnostics.is_empty() {
         anyhow::bail!("style checks still report {} issue(s)", diagnostics.len());
+    }
+    Ok(())
+}
+
+fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
+    let mut command = Command::new("cargo");
+    command.arg("fmt").arg("--all");
+    if check_only {
+        command.args(["--", "--check"]);
+    }
+    let description = if check_only {
+        "cargo fmt --all -- --check"
+    } else {
+        "cargo fmt --all"
+    };
+    let status = command
+        .current_dir(project)
+        .status()
+        .with_context(|| format!("failed to start {description}"))?;
+    if !status.success() {
+        anyhow::bail!("{description} failed");
     }
     Ok(())
 }
@@ -434,5 +445,25 @@ mod tests {
         )
         .unwrap();
         assert!(check(directory.path(), None, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn project_check_rejects_unformatted_rust() {
+        let directory = tempfile::tempdir().expect("temporary project");
+        fs::create_dir_all(directory.path().join("src")).expect("source directory");
+        fs::write(
+            directory.path().join("Cargo.toml"),
+            "[package]\nname = \"format-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("manifest");
+        fs::write(
+            directory.path().join("src/lib.rs"),
+            "pub fn value( ) ->i32{1}\n",
+        )
+        .expect("source");
+
+        let result = check_project(directory.path(), None, None);
+
+        assert!(result.is_err(), "unformatted Rust must fail project check");
     }
 }

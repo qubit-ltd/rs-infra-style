@@ -20,8 +20,13 @@ cargo install --git https://github.com/qubit-ltd/rs-infra-style.git --tag v0.1.0
 From a Rust project root:
 
 ```bash
-cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --help
+cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . check
+cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . fix
 ```
+
+`check` combines rustfmt check with the fixed project style rules. `fix` runs
+rustfmt and then validates the fixed rules. Migration-generated `style-check.sh`
+and `align-ci.sh` wrappers can call these two stable subcommands directly.
 
 The project's `.infra` configuration remains the source of truth; this tool does not copy project configuration into the tool repository.
 
