@@ -13,14 +13,20 @@ mod format;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::Cli;
-use command::Command;
-use format::Format;
 use qubit_infra_style::check_project;
 use qubit_infra_style::fix_project;
 use qubit_infra_style::print_diagnostics;
 
+use crate::cli::Cli;
+use crate::command::Command;
+use crate::format::Format;
+
 /// Parses arguments and executes the requested style operation.
+///
+/// # Errors
+///
+/// Returns an error when the project cannot be canonicalized, when Cargo or
+/// rustfmt fails, or when diagnostic output cannot be serialized.
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let project = std::fs::canonicalize(&cli.project)?;

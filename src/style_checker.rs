@@ -95,6 +95,21 @@ enum RootKind {
 /// Filesystem or Cargo metadata errors are returned as `Err`.
 /// The project path, optional source path, and optional test path determine
 /// the roots that are checked.
+///
+/// # Parameters
+///
+/// * `project` - Project root used to resolve manifests and relative roots.
+/// * `source_dir` - Optional production source directory relative to `project`.
+/// * `test_dir` - Optional external test directory relative to `project`.
+///
+/// # Returns
+///
+/// Returns all diagnostics found in the selected source and test trees.
+///
+/// # Errors
+///
+/// Returns an error when Cargo metadata cannot be obtained or a selected file
+/// cannot be read.
 pub fn check(
     project: &Path,
     source_dir: Option<&Path>,
@@ -123,6 +138,21 @@ pub fn check(
 /// project is not formatted or Cargo/rustfmt cannot be started. Custom style
 /// diagnostics are returned only after rustfmt succeeds.
 /// The project path and optional roots determine the formatting and checks.
+///
+/// # Parameters
+///
+/// * `project` - Project root passed to Cargo and used to resolve roots.
+/// * `source_dir` - Optional production source directory relative to `project`.
+/// * `test_dir` - Optional external test directory relative to `project`.
+///
+/// # Returns
+///
+/// Returns custom style diagnostics after rustfmt succeeds.
+///
+/// # Errors
+///
+/// Returns an error when rustfmt fails, Cargo cannot be started, or a selected
+/// project file cannot be read.
 pub fn check_project(
     project: &Path,
     source_dir: Option<&Path>,
@@ -137,6 +167,15 @@ pub fn check_project(
 /// JSON serialization errors are returned as `Err`; text output is written to
 /// standard output and does not itself fail.
 /// The diagnostics are rendered as text or JSON according to json.
+///
+/// # Parameters
+///
+/// * `diagnostics` - Diagnostics to render in their existing order.
+/// * `json` - Whether to render pretty-printed JSON instead of text.
+///
+/// # Errors
+///
+/// Returns an error only when JSON serialization fails.
 pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(diagnostics)?);
@@ -169,6 +208,15 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
 /// [`fix_project`] when a migration or caller supplies explicit source/test
 /// directories.
 /// The project is formatted and then checked unless dry_run is enabled.
+///
+/// # Parameters
+///
+/// * `project` - Project root passed to Cargo.
+/// * `dry_run` - Prints the formatting command without changing files when true.
+///
+/// # Errors
+///
+/// Returns an error when rustfmt or the subsequent style check fails.
 pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
     fix_project(project, None, None, dry_run)
 }
@@ -180,6 +228,18 @@ pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
 /// and the rustfmt command is printed instead. Errors from Cargo, rustfmt, or
 /// the style checks are returned as `Err`.
 /// The project and selected roots are formatted and validated.
+///
+/// # Parameters
+///
+/// * `project` - Project root passed to Cargo and used to resolve roots.
+/// * `source_dir` - Optional production source directory relative to `project`.
+/// * `test_dir` - Optional external test directory relative to `project`.
+/// * `dry_run` - Prints the formatting command without changing files when true.
+///
+/// # Errors
+///
+/// Returns an error when rustfmt fails, diagnostics remain after formatting,
+/// or a selected project file cannot be read.
 pub fn fix_project(
     project: &Path,
     source_dir: Option<&Path>,
@@ -199,6 +259,20 @@ pub fn fix_project(
 }
 
 /// Checks one package's production and test roots.
+///
+/// The internal test tree is checked only when it exists, and an external test
+/// tree is skipped when it is the same path.
+///
+/// # Parameters
+///
+/// * `project` - Project root used to produce relative diagnostic paths.
+/// * `source` - Production source root to inspect.
+/// * `tests` - External test root to inspect.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
+///
+/// # Errors
+///
+/// Returns an error when a selected source or test file cannot be read.
 fn check_package_roots(
     project: &Path,
     source: &Path,
@@ -218,6 +292,19 @@ fn check_package_roots(
 }
 
 /// Resolves workspace package roots through Cargo metadata.
+///
+/// # Parameters
+///
+/// * `project` - Workspace root passed to Cargo metadata.
+///
+/// # Returns
+///
+/// Returns source and external-test roots for the selected workspace packages.
+///
+/// # Errors
+///
+/// Returns an error when Cargo cannot be started, exits unsuccessfully, or
+/// produces invalid metadata.
 fn workspace_roots(project: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
     let output = Command::new("cargo")
         .args(["metadata", "--format-version", "1", "--no-deps"])
@@ -249,7 +336,16 @@ fn workspace_roots(project: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
     Ok(packages)
 }
 
-/// Verifies that an existing src/tests tree is connected to the crate root.
+/// Verifies that an existing `src/tests` tree is connected to the crate root.
+///
+/// Adds `STYLE012` when neither `lib.rs` nor `main.rs` declares the conventional
+/// test module entry point.
+///
+/// # Parameters
+///
+/// * `project` - Project root used to format the diagnostic path.
+/// * `source` - Source root containing the internal test tree.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_internal_test_module(project: &Path, source: &Path, diagnostics: &mut Vec<Diagnostic>) {
     let internal_tests = source.join("tests");
     let has_module = [source.join("lib.rs"), source.join("main.rs")]
@@ -273,6 +369,16 @@ fn check_internal_test_module(project: &Path, source: &Path, diagnostics: &mut V
 }
 
 /// Runs Cargo's formatter in either checking or rewriting mode.
+///
+/// # Parameters
+///
+/// * `project` - Project root in which Cargo runs.
+/// * `check_only` - Whether rustfmt should validate without rewriting files.
+///
+/// # Errors
+///
+/// Returns an error when Cargo or rustfmt cannot be started or exits with a
+/// failure status.
 fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
     let mut command = Command::new("cargo");
     command.arg("fmt").arg("--all");
@@ -295,6 +401,20 @@ fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
 }
 
 /// Walks a configured root and dispatches each Rust file to its role checks.
+///
+/// Non-Rust files and missing roots are ignored. Source-tree `tests` entries
+/// are handled separately as crate-internal tests.
+///
+/// # Parameters
+///
+/// * `project` - Project root used to produce relative diagnostic paths.
+/// * `root` - Filesystem root to walk.
+/// * `kind` - Whether the root contains production or test files.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
+///
+/// # Errors
+///
+/// Returns an error when a Rust source file cannot be read.
 fn check_root(
     project: &Path,
     root: &Path,
@@ -335,6 +455,16 @@ fn check_root(
 }
 
 /// Applies production-source rules to one parsed source file.
+///
+/// The function records diagnostics for the supplied file and never changes
+/// its contents.
+///
+/// # Parameters
+///
+/// * `relative` - Project-relative path used in diagnostics.
+/// * `path` - Filesystem path used for filename checks.
+/// * `text` - Complete source contents to inspect.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_source_file(relative: &str, path: &Path, text: &str, diagnostics: &mut Vec<Diagnostic>) {
     if !allowed(text, "coverage-cfg") {
         for (line, value) in text.lines().enumerate() {
@@ -357,6 +487,15 @@ fn check_source_file(relative: &str, path: &Path, text: &str, diagnostics: &mut 
 }
 
 /// Applies naming and source-redirection rules to one test file.
+///
+/// The function records diagnostics for the supplied file and never changes
+/// its contents.
+///
+/// # Parameters
+///
+/// * `relative` - Project-relative path used in diagnostics.
+/// * `text` - Complete test source contents to inspect.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_test_file(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) {
     if !relative.ends_with("_tests.rs") && !relative.ends_with("/mod.rs") {
         add(
@@ -385,6 +524,15 @@ fn check_test_file(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>
 }
 
 /// Checks import shape and ordering in one project-owned Rust file.
+///
+/// Imports are classified into standard-library, external-crate, and
+/// current-crate groups before ordering and blank-line diagnostics are added.
+///
+/// # Parameters
+///
+/// * `relative` - Project-relative path used in diagnostics.
+/// * `text` - Complete source contents to inspect.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_imports(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) {
     if allowed(text, "explicit-imports") {
         return;
@@ -475,6 +623,15 @@ fn check_imports(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) 
 }
 
 /// Ensures aggregation files contain only declarations and re-exports.
+///
+/// The check applies only to `lib.rs` and `mod.rs` files and records any
+/// top-level implementation item as a diagnostic.
+///
+/// # Parameters
+///
+/// * `relative` - Project-relative path used in diagnostics.
+/// * `text` - Complete source contents to inspect.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_aggregation(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) {
     if !relative.ends_with("/lib.rs") && !relative.ends_with("/mod.rs") {
         return;
@@ -525,6 +682,17 @@ fn check_aggregation(relative: &str, text: &str, diagnostics: &mut Vec<Diagnosti
 }
 
 /// Checks public type count and filename alignment in one source file.
+///
+/// A parse failure is ignored here because syntax diagnostics belong to the
+/// compiler; successfully parsed public top-level types are checked against
+/// the file stem.
+///
+/// # Parameters
+///
+/// * `relative` - Project-relative path used in diagnostics.
+/// * `path` - Filesystem path whose stem is checked.
+/// * `text` - Complete source contents to parse.
+/// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_type_layout(relative: &str, path: &Path, text: &str, diagnostics: &mut Vec<Diagnostic>) {
     let file_name = path
         .file_stem()
@@ -578,6 +746,17 @@ fn check_type_layout(relative: &str, path: &Path, text: &str, diagnostics: &mut 
 }
 
 /// Converts a Rust type name into the expected snake-case filename stem.
+///
+/// Uppercase characters after the first character receive an underscore, and
+/// Unicode lowercase mappings are preserved.
+///
+/// # Parameters
+///
+/// * `value` - Rust type name to convert.
+///
+/// # Returns
+///
+/// Returns the expected snake-case filename stem.
 fn snake_case(value: &str) -> String {
     let mut output = String::new();
     for (index, character) in value.chars().enumerate() {
@@ -590,6 +769,18 @@ fn snake_case(value: &str) -> String {
 }
 
 /// Detects a file-level opt-out marker for a named checker rule.
+///
+/// An allow marker applies to the entire file and matches either all rules or
+/// the requested rule name.
+///
+/// # Parameters
+///
+/// * `text` - Complete file contents to inspect.
+/// * `rule` - Rule name whose allow marker is requested.
+///
+/// # Returns
+///
+/// Returns `true` when the file opts out of the requested rule.
 fn allowed(text: &str, rule: &str) -> bool {
     text.lines().any(|line| {
         line.contains("qubit-style: allow all")
@@ -598,6 +789,16 @@ fn allowed(text: &str, rule: &str) -> bool {
 }
 
 /// Appends a normalized diagnostic record to the current result set.
+///
+/// The diagnostic always uses schema version 1 and error severity.
+///
+/// # Parameters
+///
+/// * `diagnostics` - Mutable diagnostic collection to append to.
+/// * `code` - Stable style rule identifier.
+/// * `path` - Project-relative source path.
+/// * `line` - One-based source line, or zero for a file-level diagnostic.
+/// * `message` - Human-readable explanation of the violation.
 fn add(diagnostics: &mut Vec<Diagnostic>, code: &str, path: &str, line: usize, message: &str) {
     diagnostics.push(Diagnostic {
         schema_version: 1,
