@@ -40,9 +40,16 @@ cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . fix
 ## 测试
 
 ```bash
+# 使用默认 feature 集运行测试
 cargo test
+
+# 使用项目声明的全部 feature 运行测试
 cargo test --all-features
+
+# 运行项目 CI 检查
 ./ci-check.sh
+
+# 检查代码覆盖率
 ./coverage.sh
 ```
 
@@ -50,7 +57,8 @@ cargo test --all-features
 
 Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-本项目基于 Apache License 2.0 授权。完整许可证文本请参阅 [LICENSE](LICENSE)。
+本项目基于 Apache License 2.0 授权。完整许可证文本请参阅
+[LICENSE](LICENSE)。
 
 ## 贡献
 

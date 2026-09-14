@@ -41,9 +41,16 @@ See the command help and source tests for the supported interface. Switch to [ä¸
 ## Testing
 
 ```bash
+# Run tests with the default feature set
 cargo test
+
+# Run tests with all declared features
 cargo test --all-features
+
+# Project CI checks
 ./ci-check.sh
+
+# Check code coverage
 ./coverage.sh
 ```
 
@@ -51,7 +58,8 @@ cargo test --all-features
 
 Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full license text.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the
+full license text.
 
 ## Contributing
 
