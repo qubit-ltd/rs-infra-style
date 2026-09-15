@@ -456,10 +456,22 @@ fn project_relative_path(project: &Path, path: &Path) -> String {
     let project = normalize_path_separators(&project.to_string_lossy());
     let path = normalize_path_separators(&path.to_string_lossy());
     let project = project.trim_end_matches('/');
-    path.strip_prefix(project)
-        .filter(|suffix| suffix.starts_with('/'))
+    let prefix = path.get(..project.len()).filter(|prefix| {
+        if is_windows_drive_path(project) && is_windows_drive_path(&path) {
+            prefix.eq_ignore_ascii_case(project)
+        } else {
+            *prefix == project
+        }
+    });
+    prefix
+        .and_then(|_| path.get(project.len()..))
+        .filter(|suffix| suffix.is_empty() || suffix.starts_with('/'))
         .map(|suffix| suffix.trim_start_matches('/').to_owned())
         .unwrap_or(path)
+}
+
+fn is_windows_drive_path(path: &str) -> bool {
+    path.as_bytes().get(1) == Some(&b':') && path.as_bytes().get(2) == Some(&b'/')
 }
 
 fn normalize_path_separators(path: &str) -> String {
@@ -983,6 +995,17 @@ mod tests {
 
         assert_eq!(
             "tests/example_tests.rs",
+            super::project_relative_path(project, file)
+        );
+    }
+
+    #[test]
+    fn project_relative_paths_match_windows_case_insensitive_roots() {
+        let project = Path::new(r"D:\A\Repo");
+        let file = Path::new(r"d:/a/repo/tests/Example.rs");
+
+        assert_eq!(
+            "tests/Example.rs",
             super::project_relative_path(project, file)
         );
     }
