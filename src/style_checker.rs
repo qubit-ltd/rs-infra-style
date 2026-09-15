@@ -335,13 +335,7 @@ fn check_internal_test_module(
         .filter_map(|path| fs::read_to_string(path).ok())
         .any(|text| text.contains("#[cfg(test)]") && text.contains("mod tests"));
     if !has_module {
-        let relative = internal_tests
-            .strip_prefix(project)
-            .unwrap_or(internal_tests.as_path())
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
+        let relative = project_relative_path(project, &internal_tests);
         if !exceptions.allows("internal-test-module", &relative) {
             add(
                 diagnostics,
@@ -435,19 +429,54 @@ fn check_root(
             continue;
         }
         let text = fs::read_to_string(path)?;
-        let relative = path
-            .strip_prefix(project)
-            .unwrap_or(path)
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
+        let relative = project_relative_path(project, path);
         match kind {
             RootKind::Source => check_source_file(&relative, path, &text, exceptions, diagnostics),
             RootKind::Tests => check_test_file(&relative, &text, exceptions, diagnostics),
         }
     }
     Ok(())
+}
+
+/// Returns a project-relative diagnostic path using forward slashes.
+///
+/// If `path` is not rooted beneath `project`, its normalized absolute path is
+/// returned so path-scoped exceptions cannot accidentally match it.
+///
+/// # Parameters
+///
+/// * `project` - Canonical project root used as the path prefix.
+/// * `path` - Filesystem path to render in a diagnostic.
+///
+/// # Returns
+///
+/// The path relative to `project`, or a normalized absolute path when it is
+/// outside the project.
+fn project_relative_path(project: &Path, path: &Path) -> String {
+    let project = normalize_path_separators(&project.to_string_lossy());
+    let path = normalize_path_separators(&path.to_string_lossy());
+    let project = project.trim_end_matches('/');
+    path.strip_prefix(project)
+        .filter(|suffix| suffix.starts_with('/'))
+        .map(|suffix| suffix.trim_start_matches('/').to_owned())
+        .unwrap_or(path)
+}
+
+fn normalize_path_separators(path: &str) -> String {
+    let mut normalized = String::with_capacity(path.len());
+    let mut previous_was_separator = false;
+    for character in path.chars() {
+        if character == '/' || character == '\\' {
+            if !previous_was_separator {
+                normalized.push('/');
+            }
+            previous_was_separator = true;
+        } else {
+            normalized.push(character);
+            previous_was_separator = false;
+        }
+    }
+    normalized
 }
 
 /// Applies production-source rules to one parsed source file.
@@ -945,6 +974,17 @@ mod tests {
         assert_eq!(1, diagnostics.len());
         assert_eq!("STYLE001", diagnostics[0].code);
         assert_eq!("tests/wrong_name.rs", diagnostics[0].path);
+    }
+
+    #[test]
+    fn project_relative_paths_match_mixed_windows_separators() {
+        let project = Path::new(r"D:\a\rs-fs\rs-fs");
+        let file = Path::new(r"D:/\/a/rs-fs/rs-fs/tests/example_tests.rs");
+
+        assert_eq!(
+            "tests/example_tests.rs",
+            super::project_relative_path(project, file)
+        );
     }
 
     #[test]
