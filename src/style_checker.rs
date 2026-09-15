@@ -490,6 +490,12 @@ fn normalize_path_separators(path: &str) -> String {
             previous_was_separator = false;
         }
     }
+    if let Some(unc_path) = normalized.strip_prefix("//?/UNC/") {
+        return format!("//{unc_path}");
+    }
+    if let Some(verbatim_path) = normalized.strip_prefix("//?/") {
+        return verbatim_path.to_owned();
+    }
     normalized
 }
 
@@ -1016,6 +1022,17 @@ mod tests {
     fn project_relative_paths_match_unc_roots_case_insensitively() {
         let project = Path::new(r"\\SERVER\Share\Repo");
         let file = Path::new(r"\\server\share\repo\tests\Example.rs");
+
+        assert_eq!(
+            "tests/Example.rs",
+            super::project_relative_path(project, file)
+        );
+    }
+
+    #[test]
+    fn project_relative_paths_match_verbatim_drive_roots() {
+        let project = Path::new(r"\\?\D:\A\Repo");
+        let file = Path::new(r"D:/a/repo/tests/Example.rs");
 
         assert_eq!(
             "tests/Example.rs",
