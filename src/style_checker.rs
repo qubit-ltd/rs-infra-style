@@ -217,7 +217,7 @@ pub fn fix_project(
     dry_run: bool,
 ) -> Result<()> {
     if dry_run {
-        println!("cargo fmt --all");
+        println!("{}", cargo_fmt_description(&cargo_fmt_command(false)));
         return Ok(());
     }
     run_cargo_fmt(project, false)?;
@@ -360,16 +360,8 @@ fn check_internal_test_module(
 /// Returns an error when Cargo or rustfmt cannot be started or exits with a
 /// failure status.
 fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
-    let mut command = Command::new("cargo");
-    command.arg("fmt").arg("--all");
-    if check_only {
-        command.args(["--", "--check"]);
-    }
-    let description = if check_only {
-        "cargo fmt --all -- --check"
-    } else {
-        "cargo fmt --all"
-    };
+    let mut command = cargo_fmt_command(check_only);
+    let description = cargo_fmt_description(&command);
     let status = command
         .current_dir(project)
         .status()
@@ -378,6 +370,53 @@ fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
         bail!("{description} failed");
     }
     Ok(())
+}
+
+/// Builds a formatter command using optional toolchain and configuration overrides.
+///
+/// `check_only` selects validation instead of rewriting. Environment values are
+/// passed as individual arguments; relative configuration paths are resolved by
+/// rustfmt from the project directory. Empty values retain Cargo's defaults.
+fn cargo_fmt_command(check_only: bool) -> Command {
+    let mut command = Command::new("cargo");
+    if let Some(toolchain) =
+        std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty())
+    {
+        let mut argument = std::ffi::OsString::from("+");
+        argument.push(toolchain);
+        command.arg(argument);
+    }
+    command.args(["fmt", "--all"]);
+    let config =
+        std::env::var_os("RS_INFRA_STYLE_RUSTFMT_CONFIG").filter(|value| !value.is_empty());
+    if check_only || config.is_some() {
+        command.arg("--");
+    }
+    if check_only {
+        command.arg("--check");
+    }
+    if let Some(config) = config {
+        command.arg("--config-path").arg(config);
+    }
+    command
+}
+
+/// Describes a formatter command for dry runs and failure diagnostics.
+///
+/// Arguments containing whitespace are quoted for readability; the returned
+/// text is never passed to a shell.
+fn cargo_fmt_description(command: &Command) -> String {
+    let mut description = String::from("cargo");
+    for argument in command.get_args() {
+        let argument = argument.to_string_lossy();
+        description.push(' ');
+        if argument.chars().any(char::is_whitespace) {
+            description.push_str(&format!("{argument:?}"));
+        } else {
+            description.push_str(&argument);
+        }
+    }
+    description
 }
 
 /// Walks a configured root and dispatches each Rust file to its role checks.

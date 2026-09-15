@@ -50,6 +50,29 @@ and `internal-test-module`. Exceptions suppress only diagnostics matching
 both the configured path and rule; malformed or unsupported entries fail the
 check.
 
+## Pinning the formatter
+
+Migration wrappers can preserve a project's rustfmt contract for both `check`
+and `fix`:
+
+```bash
+export RS_INFRA_STYLE_TOOLCHAIN=nightly-2026-06-05
+export RS_INFRA_STYLE_RUSTFMT_CONFIG="$PWD/.infra/style/rustfmt.toml"
+rs-infra-style --project . check
+rs-infra-style --project . fix
+```
+
+Install that toolchain with its rustfmt component before running the commands.
+`RS_INFRA_STYLE_TOOLCHAIN` selects `cargo +<toolchain> fmt`; the configuration
+variable adds `--config-path` to rustfmt's arguments. Either variable can be
+used independently. Unset or empty variables preserve the existing Cargo
+toolchain selection and rustfmt configuration discovery, respectively.
+Relative configuration paths are resolved from `--project`; paths containing
+spaces are supported. To keep a project's root `rustfmt.toml`, point the
+configuration variable at that file instead. The tool does not copy or replace
+configuration files. Formatter failures propagate to the command's exit status,
+and `fix --dry-run` displays the configured command without running it.
+
 ## Capabilities and limitations
 
 This first release provides the focused behavior described above. It is intentionally a small building block: project-specific policy belongs in `.infra`, and orchestration belongs in `rs-infra-ci`. It does not promise compatibility with the legacy `rs-ci` scripts beyond the commands currently covered by tests.
