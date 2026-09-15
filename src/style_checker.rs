@@ -457,7 +457,7 @@ fn project_relative_path(project: &Path, path: &Path) -> String {
     let path = normalize_path_separators(&path.to_string_lossy());
     let project = project.trim_end_matches('/');
     let prefix = path.get(..project.len()).filter(|prefix| {
-        if is_windows_drive_path(project) && is_windows_drive_path(&path) {
+        if is_windows_path(project) && is_windows_path(&path) {
             prefix.eq_ignore_ascii_case(project)
         } else {
             *prefix == project
@@ -470,16 +470,18 @@ fn project_relative_path(project: &Path, path: &Path) -> String {
         .unwrap_or(path)
 }
 
-fn is_windows_drive_path(path: &str) -> bool {
-    path.as_bytes().get(1) == Some(&b':') && path.as_bytes().get(2) == Some(&b'/')
+fn is_windows_path(path: &str) -> bool {
+    path.starts_with("//")
+        || (path.as_bytes().get(1) == Some(&b':') && path.as_bytes().get(2) == Some(&b'/'))
 }
 
 fn normalize_path_separators(path: &str) -> String {
     let mut normalized = String::with_capacity(path.len());
     let mut previous_was_separator = false;
+    let preserve_unc_prefix = path.starts_with("//") || path.starts_with(r"\\");
     for character in path.chars() {
         if character == '/' || character == '\\' {
-            if !previous_was_separator {
+            if !previous_was_separator || (preserve_unc_prefix && normalized == "/") {
                 normalized.push('/');
             }
             previous_was_separator = true;
@@ -1003,6 +1005,17 @@ mod tests {
     fn project_relative_paths_match_windows_case_insensitive_roots() {
         let project = Path::new(r"D:\A\Repo");
         let file = Path::new(r"d:/a/repo/tests/Example.rs");
+
+        assert_eq!(
+            "tests/Example.rs",
+            super::project_relative_path(project, file)
+        );
+    }
+
+    #[test]
+    fn project_relative_paths_match_unc_roots_case_insensitively() {
+        let project = Path::new(r"\\SERVER\Share\Repo");
+        let file = Path::new(r"\\server\share\repo\tests\Example.rs");
 
         assert_eq!(
             "tests/Example.rs",
