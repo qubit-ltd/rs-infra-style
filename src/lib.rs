@@ -9,6 +9,7 @@
 
 mod diagnostic;
 mod style_checker;
+mod style_exceptions;
 
 pub use diagnostic::Diagnostic;
 pub use style_checker::check;
