@@ -29,6 +29,21 @@ cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . fix
 
 项目的 `.infra` 配置仍然是行为的唯一来源；工具仓库不会复制项目配置。具体策略由项目配置决定。
 
+确需豁免现存问题时，可在 `.infra/style/exceptions.toml` 中为每条例外指定一个精确的项目相对路径和一条受支持的规则，并说明原因。不支持源码中的 `qubit-style: allow` 注释。
+
+```toml
+format = 1
+
+[[exceptions]]
+rule = "test-redirect"
+path = "tests/fixtures_tests.rs"
+reason = "该测试入口必须引入外部测试框架共用的 fixture。"
+```
+
+支持的规则为 `test-file-name`、`test-redirect`、`explicit-imports`、
+`coverage-cfg`、`aggregation-files`、`public-type-layout`、`type-file-name`
+和 `internal-test-module`。只有路径和规则同时精确匹配时才会忽略诊断；格式错误或不支持的例外会使检查失败。
+
 ## 能力与限制
 
 当前版本只提供上文列出的专门能力，刻意保持为小型基础设施组件：项目策略放在 `.infra`，任务编排交给 `rs-infra-ci`。对于旧版 `rs-ci` 脚本，只有测试覆盖的命令可视为兼容。

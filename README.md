@@ -30,6 +30,26 @@ and `align-ci.sh` wrappers can call these two stable subcommands directly.
 
 The project's `.infra` configuration remains the source of truth; this tool does not copy project configuration into the tool repository.
 
+Specific existing violations may be exempted in
+`.infra/style/exceptions.toml`, using one exact project-relative path and one
+supported rule per entry. Each exception requires a reason; source-code
+`qubit-style: allow` comments are not supported.
+
+```toml
+format = 1
+
+[[exceptions]]
+rule = "test-redirect"
+path = "tests/fixtures_tests.rs"
+reason = "This test entry point must include the fixture shared by the external harness."
+```
+
+Supported rules are `test-file-name`, `test-redirect`, `explicit-imports`,
+`coverage-cfg`, `aggregation-files`, `public-type-layout`, `type-file-name`,
+and `internal-test-module`. Exceptions suppress only diagnostics matching
+both the configured path and rule; malformed or unsupported entries fail the
+check.
+
 ## Capabilities and limitations
 
 This first release provides the focused behavior described above. It is intentionally a small building block: project-specific policy belongs in `.infra`, and orchestration belongs in `rs-infra-ci`. It does not promise compatibility with the legacy `rs-ci` scripts beyond the commands currently covered by tests.

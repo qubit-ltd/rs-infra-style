@@ -7,9 +7,10 @@
 // =============================================================================
 //! Fixed first-phase Rust style checks used by Qubit Rust projects.
 
+mod diagnostic;
 mod style_checker;
 
-pub use style_checker::Diagnostic;
+pub use diagnostic::Diagnostic;
 pub use style_checker::check;
 pub use style_checker::check_project;
 pub use style_checker::fix;

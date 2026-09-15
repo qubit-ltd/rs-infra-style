@@ -16,44 +16,12 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use serde::Deserialize;
-use serde::Serialize;
 use syn::Item;
 use syn::Visibility;
 use syn::parse_file;
 use walkdir::WalkDir;
 
-/// A machine-readable style diagnostic.
-///
-/// # Examples
-///
-/// ~~~
-/// use qubit_infra_style::Diagnostic;
-///
-/// let diagnostic = Diagnostic {
-///     schema_version: 1,
-///     code: String::from("STYLE001"),
-///     severity: String::from("error"),
-///     path: String::from("src/lib.rs"),
-///     line: 1,
-///     message: String::from("example"),
-/// };
-/// assert_eq!(diagnostic.schema_version, 1);
-/// ~~~
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct Diagnostic {
-    /// Version of the serialized diagnostic schema.
-    pub schema_version: u8,
-    /// Stable rule identifier, such as `STYLE004`.
-    pub code: String,
-    /// Diagnostic severity, currently `error`.
-    pub severity: String,
-    /// Project-relative source path.
-    pub path: String,
-    /// One-based source line, or zero for file-level diagnostics.
-    pub line: usize,
-    /// Human-readable explanation of the violation.
-    pub message: String,
-}
+use crate::Diagnostic;
 
 /// Cargo metadata needed to locate the packages checked by this crate.
 #[derive(Debug, Deserialize)]
@@ -75,6 +43,29 @@ struct CargoPackage {
     id: String,
     /// Absolute manifest path returned by Cargo.
     manifest_path: PathBuf,
+}
+
+/// Project-local, path-scoped exception configuration.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StyleExceptions {
+    /// Schema version for the exception file.
+    format: u8,
+    /// Exact path and rule pairs intentionally exempted by the project.
+    #[serde(default)]
+    exceptions: Vec<StyleException>,
+}
+
+/// One exact path/rule exception with an auditable reason.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StyleException {
+    /// Stable human-readable rule name.
+    rule: String,
+    /// Exact project-relative Rust source path.
+    path: String,
+    /// Why this one violation is accepted.
+    reason: String,
 }
 
 /// Kind of Rust tree being inspected.
@@ -129,7 +120,81 @@ pub fn check(
     for (source, tests) in roots {
         check_package_roots(project, &source, &tests, &mut diagnostics)?;
     }
+    apply_style_exceptions(project, &mut diagnostics)?;
     Ok(diagnostics)
+}
+
+/// Removes only diagnostics matching a configured exact path and rule pair.
+///
+/// An absent exception file means no exceptions are configured. Invalid files
+/// fail closed rather than silently weakening the project's style checks.
+///
+/// # Parameters
+///
+/// * `project` - Project root containing `.infra/style/exceptions.toml`.
+/// * `diagnostics` - Mutable project-relative style diagnostics.
+///
+/// # Errors
+///
+/// Returns an error when the file is malformed, uses an unsupported rule or
+/// schema version, or contains an unsafe path or empty reason.
+fn apply_style_exceptions(project: &Path, diagnostics: &mut Vec<Diagnostic>) -> Result<()> {
+    let path = project.join(".infra/style/exceptions.toml");
+    if !path.is_file() {
+        return Ok(());
+    }
+    let contents = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read style exceptions at {}", path.display()))?;
+    let config: StyleExceptions = toml::from_str(&contents)
+        .with_context(|| format!("failed to parse style exceptions at {}", path.display()))?;
+    if config.format != 1 {
+        bail!("unsupported style exception format {}", config.format);
+    }
+
+    for exception in &config.exceptions {
+        if exception.path.is_empty()
+            || exception.path.contains('\\')
+            || Path::new(&exception.path).is_absolute()
+            || Path::new(&exception.path)
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            bail!("style exception path must be a safe project-relative path");
+        }
+        if exception.reason.trim().is_empty() {
+            bail!(
+                "style exception for '{}' must include a reason",
+                exception.path
+            );
+        }
+        if codes_for_rule(&exception.rule).is_none() {
+            bail!("unsupported style exception rule '{}'", exception.rule);
+        }
+    }
+
+    diagnostics.retain(|diagnostic| {
+        !config.exceptions.iter().any(|exception| {
+            exception.path == diagnostic.path
+                && codes_for_rule(&exception.rule)
+                    .is_some_and(|codes| codes.contains(&diagnostic.code.as_str()))
+        })
+    });
+    Ok(())
+}
+
+/// Maps the public configuration rule name to its stable diagnostic codes.
+fn codes_for_rule(rule: &str) -> Option<&'static [&'static str]> {
+    match rule {
+        "test-file-name" => Some(&["STYLE001"]),
+        "test-redirect" => Some(&["STYLE002"]),
+        "explicit-imports" => Some(&["STYLE003", "STYLE004", "STYLE005", "STYLE006", "STYLE007"]),
+        "coverage-cfg" => Some(&["STYLE008"]),
+        "aggregation-files" => Some(&["STYLE009"]),
+        "public-type-layout" => Some(&["STYLE010"]),
+        "type-file-name" => Some(&["STYLE011"]),
+        "internal-test-module" => Some(&["STYLE012"]),
+        _ => None,
+    }
 }
 
 /// Runs rustfmt in check mode and then evaluates the fixed project style rules.
@@ -424,7 +489,14 @@ fn check_root(
     if !root.is_dir() {
         return Ok(());
     }
-    for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|entry| {
+            !entry.file_type().is_dir()
+                || !matches!(entry.file_name().to_str(), Some("target" | ".git"))
+        })
+        .filter_map(Result::ok)
+    {
         let path = entry.path();
         if kind == RootKind::Source
             && path
@@ -444,8 +516,10 @@ fn check_root(
         let relative = path
             .strip_prefix(project)
             .unwrap_or(path)
-            .display()
-            .to_string();
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
         match kind {
             RootKind::Source => check_source_file(&relative, path, &text, diagnostics),
             RootKind::Tests => check_test_file(&relative, &text, diagnostics),
@@ -466,19 +540,17 @@ fn check_root(
 /// * `text` - Complete source contents to inspect.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_source_file(relative: &str, path: &Path, text: &str, diagnostics: &mut Vec<Diagnostic>) {
-    if !allowed(text, "coverage-cfg") {
-        for (line, value) in text.lines().enumerate() {
-            if value.trim_start().starts_with("#[cfg") && value.contains("coverage")
-                || value.trim_start().starts_with("#[cfg_attr") && value.contains("coverage")
-            {
-                add(
-                    diagnostics,
-                    "STYLE008",
-                    relative,
-                    line + 1,
-                    "coverage-specific cfg is not allowed in source",
-                );
-            }
+    for (line, value) in text.lines().enumerate() {
+        if value.trim_start().starts_with("#[cfg") && value.contains("coverage")
+            || value.trim_start().starts_with("#[cfg_attr") && value.contains("coverage")
+        {
+            add(
+                diagnostics,
+                "STYLE008",
+                relative,
+                line + 1,
+                "coverage-specific cfg is not allowed in source",
+            );
         }
     }
     check_imports(relative, text, diagnostics);
@@ -497,7 +569,10 @@ fn check_source_file(relative: &str, path: &Path, text: &str, diagnostics: &mut 
 /// * `text` - Complete test source contents to inspect.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_test_file(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) {
-    if !relative.ends_with("_tests.rs") && !relative.ends_with("/mod.rs") {
+    if contains_test_functions(text)
+        && !relative.ends_with("_tests.rs")
+        && !relative.ends_with("/mod.rs")
+    {
         add(
             diagnostics,
             "STYLE001",
@@ -505,9 +580,6 @@ fn check_test_file(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>
             0,
             "test files should be named '*_tests.rs' or 'mod.rs'",
         );
-    }
-    if allowed(text, "test-redirect") {
-        return;
     }
     for (line, value) in text.lines().enumerate() {
         let trimmed = value.trim_start();
@@ -523,6 +595,30 @@ fn check_test_file(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>
     }
 }
 
+/// Detects conventional test functions, including functions in inline modules.
+fn contains_test_functions(text: &str) -> bool {
+    let Ok(file) = parse_file(text) else {
+        return false;
+    };
+    items_contain_test_functions(&file.items)
+}
+
+/// Recursively checks Rust items for test and rstest function attributes.
+fn items_contain_test_functions(items: &[syn::Item]) -> bool {
+    items.iter().any(|item| match item {
+        syn::Item::Fn(function) => function.attrs.iter().any(|attribute| {
+            attribute.path().segments.last().is_some_and(|segment| {
+                matches!(segment.ident.to_string().as_str(), "test" | "rstest")
+            })
+        }),
+        syn::Item::Mod(module) => module
+            .content
+            .as_ref()
+            .is_some_and(|(_, nested)| items_contain_test_functions(nested)),
+        _ => false,
+    })
+}
+
 /// Checks import shape and ordering in one project-owned Rust file.
 ///
 /// Imports are classified into standard-library, external-crate, and
@@ -534,9 +630,6 @@ fn check_test_file(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>
 /// * `text` - Complete source contents to inspect.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_imports(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) {
-    if allowed(text, "explicit-imports") {
-        return;
-    }
     let mut last_group = None;
     let mut blank_lines = 0;
     for (line, value) in text.lines().enumerate() {
@@ -636,9 +729,6 @@ fn check_aggregation(relative: &str, text: &str, diagnostics: &mut Vec<Diagnosti
     if !relative.ends_with("/lib.rs") && !relative.ends_with("/mod.rs") {
         return;
     }
-    if allowed(text, "aggregation-files") {
-        return;
-    }
     for (line, value) in text.lines().enumerate() {
         let trimmed = value.trim_start();
         if trimmed.starts_with("//")
@@ -698,8 +788,7 @@ fn check_type_layout(relative: &str, path: &Path, text: &str, diagnostics: &mut 
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
-    if matches!(file_name, "lib" | "main" | "mod" | "macros") || allowed(text, "public-type-layout")
-    {
+    if matches!(file_name, "lib" | "main" | "mod" | "macros") {
         return;
     }
     let Ok(parsed) = parse_file(text) else {
@@ -727,13 +816,13 @@ fn check_type_layout(relative: &str, path: &Path, text: &str, diagnostics: &mut 
             "STYLE010",
             relative,
             0,
-            "file contains multiple public top-level types; split them or add a reviewed allowlist entry",
+            "file contains multiple public top-level types; split them or add a reviewed .infra/style/exceptions.toml entry",
         );
         return;
     }
     if let Some((kind, name)) = types.first() {
         let expected = snake_case(name);
-        if expected != file_name && !allowed(text, "type-file-name") {
+        if expected != file_name {
             add(
                 diagnostics,
                 "STYLE011",
@@ -768,26 +857,6 @@ fn snake_case(value: &str) -> String {
     output
 }
 
-/// Detects a file-level opt-out marker for a named checker rule.
-///
-/// An allow marker applies to the entire file and matches either all rules or
-/// the requested rule name.
-///
-/// # Parameters
-///
-/// * `text` - Complete file contents to inspect.
-/// * `rule` - Rule name whose allow marker is requested.
-///
-/// # Returns
-///
-/// Returns `true` when the file opts out of the requested rule.
-fn allowed(text: &str, rule: &str) -> bool {
-    text.lines().any(|line| {
-        line.contains("qubit-style: allow all")
-            || line.contains(&format!("qubit-style: allow {rule}"))
-    })
-}
-
 /// Appends a normalized diagnostic record to the current result set.
 ///
 /// The diagnostic always uses schema version 1 and error severity.
@@ -812,7 +881,12 @@ fn add(diagnostics: &mut Vec<Diagnostic>, code: &str, path: &str, line: usize, m
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    use super::check;
+    use super::check_project;
+    use super::fix_project;
 
     #[test]
     fn reports_type_file_and_wildcard_import_violations() {
@@ -830,16 +904,57 @@ mod tests {
     }
 
     #[test]
-    fn accepts_test_allow_comment() {
+    fn configured_exception_matches_only_the_exact_path_and_rule() {
         let directory = tempfile::tempdir().unwrap();
         let tests = directory.path().join("tests");
         fs::create_dir_all(&tests).unwrap();
         fs::write(
             tests.join("legacy_tests.rs"),
-            "// qubit-style: allow test-redirect\ninclude!(\"legacy_impl.rs\");\n",
+            "include!(\"legacy_impl.rs\");\n",
         )
         .unwrap();
-        assert!(check(directory.path(), None, None).unwrap().is_empty());
+        fs::write(
+            tests.join("other_tests.rs"),
+            "// qubit-style: allow test-redirect\ninclude!(\"other_impl.rs\");\n",
+        )
+        .unwrap();
+        fs::create_dir_all(tests.join("target")).unwrap();
+        fs::write(
+            tests.join("target/generated.rs"),
+            "use std::*;\ninclude!(\"generated.rs\");\n",
+        )
+        .unwrap();
+        fs::create_dir_all(directory.path().join(".infra/style")).unwrap();
+        fs::write(
+            directory.path().join(".infra/style/exceptions.toml"),
+            "format = 1\n\n[[exceptions]]\nrule = \"test-redirect\"\npath = \"tests/legacy_tests.rs\"\nreason = \"Legacy test fixture is shared with an external harness.\"\n",
+        )
+        .unwrap();
+
+        let diagnostics = check(directory.path(), None, None).unwrap();
+
+        assert_eq!(1, diagnostics.len());
+        assert_eq!("tests/other_tests.rs", diagnostics[0].path);
+        assert_eq!("STYLE002", diagnostics[0].code);
+    }
+
+    #[test]
+    fn test_filename_rule_applies_only_to_files_containing_tests() {
+        let directory = tempfile::tempdir().unwrap();
+        let tests = directory.path().join("tests");
+        fs::create_dir_all(tests.join("support")).unwrap();
+        fs::write(tests.join("support/fixture.rs"), "pub fn fixture() {}\n").unwrap();
+        fs::write(
+            tests.join("wrong_name.rs"),
+            "#[test]\nfn test_example() {}\n",
+        )
+        .unwrap();
+
+        let diagnostics = check(directory.path(), None, None).unwrap();
+
+        assert_eq!(1, diagnostics.len());
+        assert_eq!("STYLE001", diagnostics[0].code);
+        assert_eq!("tests/wrong_name.rs", diagnostics[0].path);
     }
 
     #[test]
