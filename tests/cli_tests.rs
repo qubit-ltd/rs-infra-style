@@ -21,16 +21,8 @@ fn fix_cli_forwards_explicit_style_directories() {
         "[package]\nname = \"cli-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
     )
     .expect("manifest");
-    fs::write(
-        directory.path().join("src/lib.rs"),
-        "pub fn value() -> i32 { 1 }\n",
-    )
-    .expect("crate root");
-    fs::write(
-        directory.path().join("custom-src/wrong.rs"),
-        "use std::*;\n",
-    )
-    .expect("custom source");
+    fs::write(directory.path().join("src/lib.rs"), "pub fn value() -> i32 { 1 }\n").expect("crate root");
+    fs::write(directory.path().join("custom-src/wrong.rs"), "use std::*;\n").expect("custom source");
 
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .args([
@@ -45,10 +37,7 @@ fn fix_cli_forwards_explicit_style_directories() {
         .output()
         .expect("run style CLI");
 
-    assert!(
-        !result.status.success(),
-        "custom source violation must fail"
-    );
+    assert!(!result.status.success(), "custom source violation must fail");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("style checks still report"), "{stderr}");
 }

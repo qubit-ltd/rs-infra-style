@@ -79,11 +79,7 @@ enum RootKind {
 ///
 /// Returns an error when Cargo metadata cannot be obtained or a selected file
 /// cannot be read.
-pub fn check(
-    project: &Path,
-    source_dir: Option<&Path>,
-    test_dir: Option<&Path>,
-) -> Result<Vec<Diagnostic>> {
+pub fn check(project: &Path, source_dir: Option<&Path>, test_dir: Option<&Path>) -> Result<Vec<Diagnostic>> {
     let exceptions = ExceptionConfig::load(project)?;
     let mut diagnostics = Vec::new();
     let roots = if source_dir.is_some() || test_dir.is_some() {
@@ -123,11 +119,7 @@ pub fn check(
 ///
 /// Returns an error when rustfmt fails, Cargo cannot be started, or a selected
 /// project file cannot be read.
-pub fn check_project(
-    project: &Path,
-    source_dir: Option<&Path>,
-    test_dir: Option<&Path>,
-) -> Result<Vec<Diagnostic>> {
+pub fn check_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&Path>) -> Result<Vec<Diagnostic>> {
     run_cargo_fmt(project, true)?;
     check(project, source_dir, test_dir)
 }
@@ -154,19 +146,13 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
             if diagnostic.line == 0 {
                 println!("error: {}: {}", diagnostic.path, diagnostic.message);
             } else {
-                println!(
-                    "error: {}:{}: {}",
-                    diagnostic.path, diagnostic.line, diagnostic.message
-                );
+                println!("error: {}:{}: {}", diagnostic.path, diagnostic.line, diagnostic.message);
             }
         }
         if diagnostics.is_empty() {
             println!("Rust style checks passed.");
         } else {
-            println!(
-                "Rust style checks failed with {} issue(s).",
-                diagnostics.len()
-            );
+            println!("Rust style checks failed with {} issue(s).", diagnostics.len());
         }
     }
     Ok(())
@@ -182,7 +168,8 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
 /// # Parameters
 ///
 /// * `project` - Project root passed to Cargo.
-/// * `dry_run` - Prints the formatting command without changing files when true.
+/// * `dry_run` - Prints the formatting command without changing files when
+///   true.
 ///
 /// # Errors
 ///
@@ -204,18 +191,14 @@ pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
 /// * `project` - Project root passed to Cargo and used to resolve roots.
 /// * `source_dir` - Optional production source directory relative to `project`.
 /// * `test_dir` - Optional external test directory relative to `project`.
-/// * `dry_run` - Prints the formatting command without changing files when true.
+/// * `dry_run` - Prints the formatting command without changing files when
+///   true.
 ///
 /// # Errors
 ///
 /// Returns an error when rustfmt fails, diagnostics remain after formatting,
 /// or a selected project file cannot be read.
-pub fn fix_project(
-    project: &Path,
-    source_dir: Option<&Path>,
-    test_dir: Option<&Path>,
-    dry_run: bool,
-) -> Result<()> {
+pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&Path>, dry_run: bool) -> Result<()> {
     if dry_run {
         println!("{}", cargo_fmt_description(&cargo_fmt_command(false)));
         return Ok(());
@@ -254,13 +237,7 @@ fn check_package_roots(
     let internal_tests = source.join("tests");
     if internal_tests.is_dir() {
         check_internal_test_module(project, source, exceptions, diagnostics);
-        check_root(
-            project,
-            &internal_tests,
-            RootKind::Tests,
-            exceptions,
-            diagnostics,
-        )?;
+        check_root(project, &internal_tests, RootKind::Tests, exceptions, diagnostics)?;
     }
     if tests != internal_tests {
         check_root(project, tests, RootKind::Tests, exceptions, diagnostics)?;
@@ -315,8 +292,8 @@ fn workspace_roots(project: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
 
 /// Verifies that an existing `src/tests` tree is connected to the crate root.
 ///
-/// Adds `STYLE012` when neither `lib.rs` nor `main.rs` declares the conventional
-/// test module entry point.
+/// Adds `STYLE012` when neither `lib.rs` nor `main.rs` declares the
+/// conventional test module entry point.
 ///
 /// # Parameters
 ///
@@ -372,23 +349,21 @@ fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
     Ok(())
 }
 
-/// Builds a formatter command using optional toolchain and configuration overrides.
+/// Builds a formatter command using optional toolchain and configuration
+/// overrides.
 ///
 /// `check_only` selects validation instead of rewriting. Environment values are
 /// passed as individual arguments; relative configuration paths are resolved by
 /// rustfmt from the project directory. Empty values retain Cargo's defaults.
 fn cargo_fmt_command(check_only: bool) -> Command {
     let mut command = Command::new("cargo");
-    if let Some(toolchain) =
-        std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty())
-    {
+    if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
         let mut argument = std::ffi::OsString::from("+");
         argument.push(toolchain);
         command.arg(argument);
     }
     command.args(["fmt", "--all"]);
-    let config =
-        std::env::var_os("RS_INFRA_STYLE_RUSTFMT_CONFIG").filter(|value| !value.is_empty());
+    let config = std::env::var_os("RS_INFRA_STYLE_RUSTFMT_CONFIG").filter(|value| !value.is_empty());
     if check_only || config.is_some() {
         command.arg("--");
     }
@@ -447,8 +422,7 @@ fn check_root(
     for entry in WalkDir::new(root)
         .into_iter()
         .filter_entry(|entry| {
-            !entry.file_type().is_dir()
-                || !matches!(entry.file_name().to_str(), Some("target" | ".git"))
+            !entry.file_type().is_dir() || !matches!(entry.file_name().to_str(), Some("target" | ".git"))
         })
         .filter_map(Result::ok)
     {
@@ -462,9 +436,7 @@ fn check_root(
         {
             continue;
         }
-        if !entry.file_type().is_file()
-            || path.extension().and_then(|value| value.to_str()) != Some("rs")
-        {
+        if !entry.file_type().is_file() || path.extension().and_then(|value| value.to_str()) != Some("rs") {
             continue;
         }
         let text = fs::read_to_string(path)?;
@@ -510,8 +482,7 @@ fn project_relative_path(project: &Path, path: &Path) -> String {
 }
 
 fn is_windows_path(path: &str) -> bool {
-    path.starts_with("//")
-        || (path.as_bytes().get(1) == Some(&b':') && path.as_bytes().get(2) == Some(&b'/'))
+    path.starts_with("//") || (path.as_bytes().get(1) == Some(&b':') && path.as_bytes().get(2) == Some(&b'/'))
 }
 
 fn normalize_path_separators(path: &str) -> String {
@@ -588,12 +559,7 @@ fn check_source_file(
 /// * `text` - Complete test source contents to inspect.
 /// * `exceptions` - Exact project-local exceptions for supported rules.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
-fn check_test_file(
-    relative: &str,
-    text: &str,
-    exceptions: &ExceptionConfig,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn check_test_file(relative: &str, text: &str, exceptions: &ExceptionConfig, diagnostics: &mut Vec<Diagnostic>) {
     if contains_test_functions(text)
         && !relative.ends_with("_tests.rs")
         && !relative.ends_with("/mod.rs")
@@ -635,9 +601,11 @@ fn contains_test_functions(text: &str) -> bool {
 fn items_contain_test_functions(items: &[syn::Item]) -> bool {
     items.iter().any(|item| match item {
         syn::Item::Fn(function) => function.attrs.iter().any(|attribute| {
-            attribute.path().segments.last().is_some_and(|segment| {
-                matches!(segment.ident.to_string().as_str(), "test" | "rstest")
-            })
+            attribute
+                .path()
+                .segments
+                .last()
+                .is_some_and(|segment| matches!(segment.ident.to_string().as_str(), "test" | "rstest"))
         }),
         syn::Item::Mod(module) => module
             .content
@@ -658,12 +626,7 @@ fn items_contain_test_functions(items: &[syn::Item]) -> bool {
 /// * `text` - Complete source contents to inspect.
 /// * `exceptions` - Exact project-local exceptions for supported rules.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
-fn check_imports(
-    relative: &str,
-    text: &str,
-    exceptions: &ExceptionConfig,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn check_imports(relative: &str, text: &str, exceptions: &ExceptionConfig, diagnostics: &mut Vec<Diagnostic>) {
     if exceptions.allows("explicit-imports", relative) {
         return;
     }
@@ -680,10 +643,7 @@ fn check_imports(
         if trimmed.starts_with("#[") && last_group.is_some() {
             continue;
         }
-        if let Some(path) = trimmed
-            .strip_prefix("use ")
-            .and_then(|value| value.strip_suffix(';'))
-        {
+        if let Some(path) = trimmed.strip_prefix("use ").and_then(|value| value.strip_suffix(';')) {
             if path.contains('{') {
                 add(
                     diagnostics,
@@ -702,15 +662,9 @@ fn check_imports(
                     "wildcard imports are not allowed",
                 );
             }
-            let group = if path.starts_with("std::")
-                || path.starts_with("core::")
-                || path.starts_with("alloc::")
-            {
+            let group = if path.starts_with("std::") || path.starts_with("core::") || path.starts_with("alloc::") {
                 0
-            } else if path.starts_with("crate::")
-                || path.starts_with("self::")
-                || path.starts_with("super::")
-            {
+            } else if path.starts_with("crate::") || path.starts_with("self::") || path.starts_with("super::") {
                 2
             } else {
                 1
@@ -762,12 +716,7 @@ fn check_imports(
 /// * `relative` - Project-relative path used in diagnostics.
 /// * `text` - Complete source contents to inspect.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
-fn check_aggregation(
-    relative: &str,
-    text: &str,
-    exceptions: &ExceptionConfig,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+fn check_aggregation(relative: &str, text: &str, exceptions: &ExceptionConfig, diagnostics: &mut Vec<Diagnostic>) {
     if !relative.ends_with("/lib.rs") && !relative.ends_with("/mod.rs") {
         return;
     }
@@ -835,10 +784,7 @@ fn check_type_layout(
     exceptions: &ExceptionConfig,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let file_name = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default();
+    let file_name = path.file_stem().and_then(|value| value.to_str()).unwrap_or_default();
     if matches!(file_name, "lib" | "main" | "mod" | "macros") {
         return;
     }
@@ -849,15 +795,9 @@ fn check_type_layout(
         .items
         .iter()
         .filter_map(|item| match item {
-            Item::Struct(item) if matches!(item.vis, Visibility::Public(_)) => {
-                Some(("struct", item.ident.to_string()))
-            }
-            Item::Enum(item) if matches!(item.vis, Visibility::Public(_)) => {
-                Some(("enum", item.ident.to_string()))
-            }
-            Item::Trait(item) if matches!(item.vis, Visibility::Public(_)) => {
-                Some(("trait", item.ident.to_string()))
-            }
+            Item::Struct(item) if matches!(item.vis, Visibility::Public(_)) => Some(("struct", item.ident.to_string())),
+            Item::Enum(item) if matches!(item.vis, Visibility::Public(_)) => Some(("enum", item.ident.to_string())),
+            Item::Trait(item) if matches!(item.vis, Visibility::Public(_)) => Some(("trait", item.ident.to_string())),
             _ => None,
         })
         .collect();
@@ -947,11 +887,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let source = directory.path().join("src");
         fs::create_dir_all(&source).unwrap();
-        fs::write(
-            source.join("wrong.rs"),
-            "use std::*;\npub struct GoodName;\n",
-        )
-        .unwrap();
+        fs::write(source.join("wrong.rs"), "use std::*;\npub struct GoodName;\n").unwrap();
         let diagnostics = check(directory.path(), None, None).unwrap();
         assert!(diagnostics.iter().any(|item| item.code == "STYLE004"));
         assert!(diagnostics.iter().any(|item| item.code == "STYLE011"));
@@ -968,11 +904,7 @@ mod tests {
             "format = 1\n\n[[exceptions]]\nrule = \"test-redirect\"\npath = \"tests/wrong_name.rs\"\nreason = \"This fixture intentionally redirects to shared test code.\"\n",
         )
         .unwrap();
-        fs::write(
-            tests.join("legacy_tests.rs"),
-            "include!(\"legacy_impl.rs\");\n",
-        )
-        .unwrap();
+        fs::write(tests.join("legacy_tests.rs"), "include!(\"legacy_impl.rs\");\n").unwrap();
         fs::write(
             tests.join("wrong_name.rs"),
             "#[test]\nfn test_example() {}\ninclude!(\"other_impl.rs\");\n",
@@ -1022,11 +954,7 @@ mod tests {
         let tests = directory.path().join("tests");
         fs::create_dir_all(tests.join("support")).unwrap();
         fs::write(tests.join("support/fixture.rs"), "pub fn fixture() {}\n").unwrap();
-        fs::write(
-            tests.join("wrong_name.rs"),
-            "#[test]\nfn test_example() {}\n",
-        )
-        .unwrap();
+        fs::write(tests.join("wrong_name.rs"), "#[test]\nfn test_example() {}\n").unwrap();
 
         let diagnostics = check(directory.path(), None, None).unwrap();
 
@@ -1040,10 +968,7 @@ mod tests {
         let project = Path::new(r"D:\a\rs-fs\rs-fs");
         let file = Path::new(r"D:/\/a/rs-fs/rs-fs/tests/example_tests.rs");
 
-        assert_eq!(
-            "tests/example_tests.rs",
-            super::project_relative_path(project, file)
-        );
+        assert_eq!("tests/example_tests.rs", super::project_relative_path(project, file));
     }
 
     #[test]
@@ -1051,10 +976,7 @@ mod tests {
         let project = Path::new(r"D:\A\Repo");
         let file = Path::new(r"d:/a/repo/tests/Example.rs");
 
-        assert_eq!(
-            "tests/Example.rs",
-            super::project_relative_path(project, file)
-        );
+        assert_eq!("tests/Example.rs", super::project_relative_path(project, file));
     }
 
     #[test]
@@ -1062,10 +984,7 @@ mod tests {
         let project = Path::new(r"\\SERVER\Share\Repo");
         let file = Path::new(r"\\server\share\repo\tests\Example.rs");
 
-        assert_eq!(
-            "tests/Example.rs",
-            super::project_relative_path(project, file)
-        );
+        assert_eq!("tests/Example.rs", super::project_relative_path(project, file));
     }
 
     #[test]
@@ -1073,10 +992,7 @@ mod tests {
         let project = Path::new(r"\\?\D:\A\Repo");
         let file = Path::new(r"D:/a/repo/tests/Example.rs");
 
-        assert_eq!(
-            "tests/Example.rs",
-            super::project_relative_path(project, file)
-        );
+        assert_eq!("tests/Example.rs", super::project_relative_path(project, file));
     }
 
     #[test]
@@ -1088,11 +1004,7 @@ mod tests {
             "[package]\nname = \"format-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
         )
         .expect("manifest");
-        fs::write(
-            directory.path().join("src/lib.rs"),
-            "pub fn value( ) ->i32{1}\n",
-        )
-        .expect("source");
+        fs::write(directory.path().join("src/lib.rs"), "pub fn value( ) ->i32{1}\n").expect("source");
 
         let result = check_project(directory.path(), None, None);
 
@@ -1113,11 +1025,7 @@ mod tests {
             "[package]\nname = \"crate\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
         )
         .expect("package manifest");
-        fs::write(
-            directory.path().join("crate/src/lib.rs"),
-            "#[cfg(test)] mod tests;\n",
-        )
-        .expect("crate root");
+        fs::write(directory.path().join("crate/src/lib.rs"), "#[cfg(test)] mod tests;\n").expect("crate root");
         fs::write(
             directory.path().join("crate/src/tests/redirect.rs"),
             "include!(\"fixture.rs\");\n",
@@ -1127,9 +1035,9 @@ mod tests {
         let diagnostics = check(directory.path(), None, None).expect("style check");
 
         assert!(
-            diagnostics.iter().any(|item| {
-                item.code == "STYLE002" && item.path == "crate/src/tests/redirect.rs"
-            })
+            diagnostics
+                .iter()
+                .any(|item| { item.code == "STYLE002" && item.path == "crate/src/tests/redirect.rs" })
         );
     }
 
@@ -1144,16 +1052,8 @@ mod tests {
         )
         .expect("manifest");
         fs::create_dir_all(directory.path().join("src")).expect("Cargo source directory");
-        fs::write(
-            directory.path().join("src/lib.rs"),
-            "pub fn value() -> i32 { 1 }\n",
-        )
-        .expect("Cargo source");
-        fs::write(
-            directory.path().join("custom-src/wrong.rs"),
-            "use std::*;\n",
-        )
-        .expect("custom source");
+        fs::write(directory.path().join("src/lib.rs"), "pub fn value() -> i32 { 1 }\n").expect("Cargo source");
+        fs::write(directory.path().join("custom-src/wrong.rs"), "use std::*;\n").expect("custom source");
 
         let result = fix_project(
             directory.path(),

@@ -35,10 +35,8 @@ impl ExceptionConfig {
                 exceptions: Vec::new(),
             });
         }
-        let text = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        let config: Self =
-            toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?;
+        let text = fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let config: Self = toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?;
         config.validate(project)?;
         Ok(config)
     }
@@ -55,25 +53,14 @@ impl ExceptionConfig {
         let mut keys = HashSet::new();
         for exception in &self.exceptions {
             if !known_rule(&exception.rule) {
-                bail!(
-                    "{} contains unknown style rule '{}'",
-                    CONFIG_PATH,
-                    exception.rule
-                );
+                bail!("{} contains unknown style rule '{}'", CONFIG_PATH, exception.rule);
             }
             if exception.path.is_empty()
                 || Path::new(&exception.path).is_absolute()
-                || exception
-                    .path
-                    .split('/')
-                    .any(|part| part == ".." || part.is_empty())
+                || exception.path.split('/').any(|part| part == ".." || part.is_empty())
                 || exception.path.contains('\\')
             {
-                bail!(
-                    "{} contains invalid relative path '{}'",
-                    CONFIG_PATH,
-                    exception.path
-                );
+                bail!("{} contains invalid relative path '{}'", CONFIG_PATH, exception.path);
             }
             if exception.reason.trim().is_empty() {
                 bail!(
@@ -93,11 +80,7 @@ impl ExceptionConfig {
                 );
             }
             if !project.join(&exception.path).is_file() {
-                bail!(
-                    "{} refers to missing file '{}'",
-                    CONFIG_PATH,
-                    exception.path
-                );
+                bail!("{} refers to missing file '{}'", CONFIG_PATH, exception.path);
             }
         }
         Ok(())

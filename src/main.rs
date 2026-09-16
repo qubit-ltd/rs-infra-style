@@ -29,10 +29,7 @@ fn main() {
     match run(cli) {
         Ok(success) => {
             if json {
-                eprintln!(
-                    "Rust style checks {}.",
-                    if success { "passed" } else { "failed" }
-                );
+                eprintln!("Rust style checks {}.", if success { "passed" } else { "failed" });
             } else if success && !is_check {
                 println!("Rust style operation completed successfully.");
             }
@@ -52,18 +49,12 @@ fn run(cli: Cli) -> Result<bool> {
     let project = std::fs::canonicalize(&cli.project)?;
     match cli.command {
         Command::Check => {
-            let diagnostics =
-                check_project(&project, cli.source_dir.as_deref(), cli.test_dir.as_deref())?;
+            let diagnostics = check_project(&project, cli.source_dir.as_deref(), cli.test_dir.as_deref())?;
             print_diagnostics(&diagnostics, cli.format == Format::Json)?;
             Ok(diagnostics.is_empty())
         }
         Command::Fix { dry_run } => {
-            fix_project(
-                &project,
-                cli.source_dir.as_deref(),
-                cli.test_dir.as_deref(),
-                dry_run,
-            )?;
+            fix_project(&project, cli.source_dir.as_deref(), cli.test_dir.as_deref(), dry_run)?;
             Ok(true)
         }
     }
