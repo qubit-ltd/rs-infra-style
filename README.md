@@ -44,9 +44,10 @@ path = "tests/fixtures_tests.rs"
 reason = "This test entry point must include the fixture shared by the external harness."
 ```
 
-Supported rules are `test-file-name`, `test-redirect`, `explicit-imports`,
-`coverage-cfg`, `aggregation-files`, `public-type-layout`, `type-file-name`,
-and `internal-test-module`. Exceptions suppress only diagnostics matching
+Supported rules are `inline-tests`, `test-file-name`, `test-redirect`,
+`source-test-pair`, `explicit-imports`, `coverage-cfg`, `aggregation-files`,
+`public-type-layout`, `multiple-public-types`, `type-file-name`, and
+`internal-test-module`. Exceptions suppress only diagnostics matching
 both the configured path and rule; malformed or unsupported entries fail the
 check.
 
@@ -75,7 +76,11 @@ and `fix --dry-run` displays the configured command without running it.
 
 ## Capabilities and limitations
 
-This first release provides the focused behavior described above. It is intentionally a small building block: project-specific policy belongs in `.infra`, and orchestration belongs in `rs-infra-ci`. It does not promise compatibility with the legacy `rs-ci` scripts beyond the commands currently covered by tests.
+This release preserves the legacy `rs-ci/style-check.sh` rules, including the
+opt-in environment switches `STYLE_ENFORCE_INLINE_TESTS` and
+`STYLE_ENFORCE_SOURCE_TEST_PAIRS`. Project-specific exceptions belong in
+`.infra/style/exceptions.toml`; orchestration such as Clippy, coverage, and
+Cargo.lock updates remains the responsibility of `rs-infra-ci`.
 
 ## Learn More
 

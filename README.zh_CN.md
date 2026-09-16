@@ -40,9 +40,10 @@ path = "tests/fixtures_tests.rs"
 reason = "该测试入口必须引入外部测试框架共用的 fixture。"
 ```
 
-支持的规则为 `test-file-name`、`test-redirect`、`explicit-imports`、
-`coverage-cfg`、`aggregation-files`、`public-type-layout`、`type-file-name`
-和 `internal-test-module`。只有路径和规则同时精确匹配时才会忽略诊断；格式错误或不支持的例外会使检查失败。
+支持的规则为 `inline-tests`、`test-file-name`、`test-redirect`、
+`source-test-pair`、`explicit-imports`、`coverage-cfg`、`aggregation-files`、
+`public-type-layout`、`multiple-public-types`、`type-file-name` 和
+`internal-test-module`。只有路径和规则同时精确匹配时才会忽略诊断；格式错误或不支持的例外会使检查失败。
 
 ## 固定格式化工具和配置
 
@@ -66,7 +67,10 @@ rs-infra-style --project . fix
 
 ## 能力与限制
 
-当前版本只提供上文列出的专门能力，刻意保持为小型基础设施组件：项目策略放在 `.infra`，任务编排交给 `rs-infra-ci`。对于旧版 `rs-ci` 脚本，只有测试覆盖的命令可视为兼容。
+当前版本保留旧 `rs-ci/style-check.sh` 的风格规则，包括可选的环境开关
+`STYLE_ENFORCE_INLINE_TESTS` 和 `STYLE_ENFORCE_SOURCE_TEST_PAIRS`。项目例外放在
+`.infra/style/exceptions.toml`；Clippy、coverage 和 Cargo.lock 更新等编排仍由
+`rs-infra-ci` 负责。
 
 ## 延伸阅读
 
