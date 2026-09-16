@@ -103,6 +103,7 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
     .expect("fake cargo");
     fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).expect("executable cargo");
     let output_path = project.path().join("arguments");
+    let manifest_path = project.path().join("Cargo.toml");
     for (toolchain, config) in [(false, false), (true, false), (false, true), (true, true)] {
         for operation in ["check", "fix"] {
             let mut command = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"));
@@ -122,7 +123,8 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
             if config {
                 command.env("RS_INFRA_STYLE_RUSTFMT_CONFIG", "shared config.toml");
             }
-            expected.extend(["fmt", "--all"]);
+            expected.extend(["fmt", "--all", "--manifest-path"]);
+            expected.push(manifest_path.to_str().expect("manifest path"));
             if operation == "check" || config {
                 expected.push("--");
             }
@@ -157,6 +159,77 @@ fn test_formatter_dry_run_shows_contract_without_running_cargo() {
     assert!(result.status.success(), "dry run must not invoke cargo");
     assert_eq!(
         String::from_utf8(result.stdout).expect("command text"),
-        "cargo +nightly-2026-06-05 fmt --all -- --config-path \"shared config.toml\"\nRust style operation completed successfully.\n"
+        format!(
+            "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml -- --config-path \"shared config.toml\"\nRust style operation completed successfully.\n",
+            project.path().display()
+        )
+    );
+}
+
+#[test]
+fn test_legacy_style_rules_are_reported() {
+    let project = tempdir().expect("temporary project");
+    fs::write(
+        project.path().join("Cargo.toml"),
+        "[package]\nname = \"legacy-style-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("manifest");
+    fs::create_dir_all(project.path().join("src")).expect("source directory");
+    fs::create_dir_all(project.path().join("tests/support")).expect("test directory");
+    fs::write(project.path().join("src/lib.rs"), "pub mod wrong;\n").expect("crate root");
+    fs::write(
+        project.path().join("src/wrong.rs"),
+        "use std::*;\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn works() {}\n}\n",
+    )
+    .expect("inline test source");
+    fs::write(project.path().join("tests/support/helpers.rs"), "fn helper() {}\n").expect("support test");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
+        .args([
+            "--project",
+            project.path().to_str().expect("project path"),
+            "--source-dir",
+            "src",
+            "--test-dir",
+            "tests",
+            "check",
+        ])
+        .env("STYLE_ENFORCE_INLINE_TESTS", "1")
+        .output()
+        .expect("run style checker");
+
+    let stderr = String::from_utf8_lossy(&result.stdout);
+    assert!(!result.status.success(), "legacy inline-test rule must fail");
+    assert!(stderr.contains("inline test attributes are not allowed"), "{stderr}");
+    assert!(stderr.contains("wildcard imports are not allowed"), "{stderr}");
+}
+
+#[test]
+fn source_test_pair_rule_is_opt_in_like_legacy_rs_ci() {
+    let project = tempdir().expect("temporary project");
+    fs::write(
+        project.path().join("Cargo.toml"),
+        "[package]\nname = \"pair-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("manifest");
+    fs::create_dir_all(project.path().join("src")).expect("source directory");
+    fs::create_dir_all(project.path().join("tests")).expect("test directory");
+    fs::write(project.path().join("src/lib.rs"), "pub mod widget;\n").expect("crate root");
+    fs::write(project.path().join("src/widget.rs"), "pub struct Widget;\n").expect("source file");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
+        .args(["--project", project.path().to_str().expect("project path"), "check"])
+        .env("STYLE_ENFORCE_SOURCE_TEST_PAIRS", "1")
+        .output()
+        .expect("run style checker");
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        !result.status.success(),
+        "missing source test pair must fail when enabled"
+    );
+    assert!(
+        stdout.contains("missing corresponding test file 'tests/widget_tests.rs'"),
+        "{stdout}"
     );
 }

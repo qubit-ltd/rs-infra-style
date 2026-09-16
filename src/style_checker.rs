@@ -200,7 +200,7 @@ pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
 /// or a selected project file cannot be read.
 pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&Path>, dry_run: bool) -> Result<()> {
     if dry_run {
-        println!("{}", cargo_fmt_description(&cargo_fmt_command(false)));
+        println!("{}", cargo_fmt_description(&cargo_fmt_command(project, false)));
         return Ok(());
     }
     run_cargo_fmt(project, false)?;
@@ -242,7 +242,97 @@ fn check_package_roots(
     if tests != internal_tests {
         check_root(project, tests, RootKind::Tests, exceptions, diagnostics)?;
     }
+    check_source_test_pairs(project, source, tests, exceptions, diagnostics)?;
     Ok(())
+}
+
+/// Enforces the legacy opt-in source-to-integration-test pairing rule.
+fn check_source_test_pairs(
+    project: &Path,
+    source: &Path,
+    tests: &Path,
+    exceptions: &ExceptionConfig,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<()> {
+    if !env_flag("STYLE_ENFORCE_SOURCE_TEST_PAIRS", false) || !source.is_dir() || !tests.is_dir() {
+        return Ok(());
+    }
+    let test_files = rust_files(tests)?;
+    for file in rust_files(source)? {
+        let relative = project_relative_path(project, &file);
+        let source_relative = file.strip_prefix(source).unwrap_or(file.as_path());
+        let file_name = file.file_name().and_then(|value| value.to_str()).unwrap_or_default();
+        if matches!(file_name, "lib.rs" | "main.rs" | "mod.rs" | "macros.rs")
+            || file_name.ends_with("_tests.rs")
+            || exceptions.allows("source-test-pair", &relative)
+            || type_alias_only(&file)?
+        {
+            continue;
+        }
+        let Some(stem) = file.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let expected_name = format!("{stem}_tests.rs");
+        let expected = tests.join(source_relative).with_file_name(&expected_name);
+        let sibling = file.with_file_name(&expected_name);
+        let has_matching_test = test_files
+            .iter()
+            .any(|test| test.file_name().and_then(|value| value.to_str()) == Some(expected_name.as_str()));
+        let mut parent = source_relative.parent().and_then(Path::parent);
+        let mut has_parent_test = false;
+        while let Some(directory) = parent {
+            if let Some(module) = directory.file_name().and_then(|value| value.to_str()) {
+                let module_source = source.join(directory).with_extension("rs");
+                let module_test = format!("{module}_tests.rs");
+                if module_source.is_file()
+                    && test_files
+                        .iter()
+                        .any(|test| test.file_name().and_then(|value| value.to_str()) == Some(module_test.as_str()))
+                {
+                    has_parent_test = true;
+                    break;
+                }
+            }
+            parent = directory.parent();
+        }
+        if !expected.is_file() && !has_matching_test && !sibling.is_file() && !has_parent_test {
+            add(
+                diagnostics,
+                "STYLE014",
+                &relative,
+                0,
+                &format!("missing corresponding test file 'tests/{expected_name}'"),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Returns Rust files below a directory in deterministic order.
+fn rust_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    if !root.is_dir() {
+        return Ok(files);
+    }
+    for entry in WalkDir::new(root).into_iter().filter_entry(|entry| {
+        !entry.file_type().is_dir() || !matches!(entry.file_name().to_str(), Some("target" | ".git"))
+    }) {
+        let entry = entry.context("failed to walk style source tree")?;
+        if entry.file_type().is_file() && entry.path().extension().and_then(|value| value.to_str()) == Some("rs") {
+            files.push(entry.into_path());
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Identifies files containing only one or more top-level type aliases.
+fn type_alias_only(path: &Path) -> Result<bool> {
+    let text = fs::read_to_string(path)?;
+    let Ok(file) = parse_file(&text) else {
+        return Ok(false);
+    };
+    Ok(!file.items.is_empty() && file.items.iter().all(|item| matches!(item, Item::Type(_))))
 }
 
 /// Resolves workspace package roots through Cargo metadata.
@@ -337,7 +427,16 @@ fn check_internal_test_module(
 /// Returns an error when Cargo or rustfmt cannot be started or exits with a
 /// failure status.
 fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
-    let mut command = cargo_fmt_command(check_only);
+    run_formatter_command(cargo_fmt_command(project, check_only), project)?;
+    let fuzz_manifest = project.join("fuzz/Cargo.toml");
+    if fuzz_manifest.is_file() {
+        run_formatter_command(cargo_fuzz_fmt_command(&fuzz_manifest, check_only), project)?;
+    }
+    Ok(())
+}
+
+/// Runs one Cargo formatter command and propagates its exact failure.
+fn run_formatter_command(mut command: Command, project: &Path) -> Result<()> {
     let description = cargo_fmt_description(&command);
     let status = command
         .current_dir(project)
@@ -355,14 +454,15 @@ fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
 /// `check_only` selects validation instead of rewriting. Environment values are
 /// passed as individual arguments; relative configuration paths are resolved by
 /// rustfmt from the project directory. Empty values retain Cargo's defaults.
-fn cargo_fmt_command(check_only: bool) -> Command {
+fn cargo_fmt_command(project: &Path, check_only: bool) -> Command {
     let mut command = Command::new("cargo");
     if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
         let mut argument = std::ffi::OsString::from("+");
         argument.push(toolchain);
         command.arg(argument);
     }
-    command.args(["fmt", "--all"]);
+    command.args(["fmt", "--all", "--manifest-path"]);
+    command.arg(project.join("Cargo.toml"));
     let config = std::env::var_os("RS_INFRA_STYLE_RUSTFMT_CONFIG").filter(|value| !value.is_empty());
     if check_only || config.is_some() {
         command.arg("--");
@@ -372,6 +472,27 @@ fn cargo_fmt_command(check_only: bool) -> Command {
     }
     if let Some(config) = config {
         command.arg("--config-path").arg(config);
+    }
+    command
+}
+
+/// Builds the legacy second formatter invocation for a standalone fuzz crate.
+fn cargo_fuzz_fmt_command(manifest: &Path, check_only: bool) -> Command {
+    let mut command = Command::new("cargo");
+    if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
+        let mut argument = std::ffi::OsString::from("+");
+        argument.push(toolchain);
+        command.arg(argument);
+    }
+    command.args(["fmt", "--manifest-path"]);
+    command.arg(manifest);
+    command.arg("--");
+    if check_only {
+        command.arg("--check");
+    }
+    if let Some(config) = std::env::var_os("RS_INFRA_STYLE_RUSTFMT_CONFIG").filter(|value| !value.is_empty()) {
+        command.args(["--config-path"]);
+        command.arg(config);
     }
     command
 }
@@ -528,6 +649,7 @@ fn check_source_file(
     exceptions: &ExceptionConfig,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    check_inline_tests(relative, text, exceptions, diagnostics);
     if !exceptions.allows("coverage-cfg", relative) {
         for (line, value) in text.lines().enumerate() {
             if value.trim_start().starts_with("#[cfg") && value.contains("coverage")
@@ -548,6 +670,30 @@ fn check_source_file(
     check_type_layout(relative, path, text, exceptions, diagnostics);
 }
 
+/// Enforces the legacy opt-in rule that test code must not live in `src/`.
+fn check_inline_tests(relative: &str, text: &str, exceptions: &ExceptionConfig, diagnostics: &mut Vec<Diagnostic>) {
+    if !env_flag("STYLE_ENFORCE_INLINE_TESTS", false) || exceptions.allows("inline-tests", relative) {
+        return;
+    }
+    for (line, value) in text.lines().enumerate() {
+        let trimmed = value.trim_start();
+        let is_test_attribute = trimmed.starts_with("#[cfg(test")
+            || trimmed.starts_with("#[test")
+            || trimmed.starts_with("#[rstest")
+            || trimmed.contains("::test]")
+            || trimmed.contains("::test(");
+        if is_test_attribute {
+            add(
+                diagnostics,
+                "STYLE013",
+                relative,
+                line + 1,
+                "test code must live under 'tests/'; inline test attributes are not allowed in source",
+            );
+        }
+    }
+}
+
 /// Applies naming and source-redirection rules to one test file.
 ///
 /// The function records diagnostics for the supplied file and never changes
@@ -560,7 +706,12 @@ fn check_source_file(
 /// * `exceptions` - Exact project-local exceptions for supported rules.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
 fn check_test_file(relative: &str, text: &str, exceptions: &ExceptionConfig, diagnostics: &mut Vec<Diagnostic>) {
-    if contains_test_functions(text)
+    let is_support_file = relative
+        .split('/')
+        .any(|part| matches!(part, "support" | "common" | "fixtures" | "coverage_support"));
+    let contains_tests = contains_test_functions(text) || contains_test_attributes(text);
+    if !is_support_file
+        && contains_tests
         && !relative.ends_with("_tests.rs")
         && !relative.ends_with("/mod.rs")
         && !exceptions.allows("test-file-name", relative)
@@ -573,7 +724,7 @@ fn check_test_file(relative: &str, text: &str, exceptions: &ExceptionConfig, dia
             "test files should be named '*_tests.rs' or 'mod.rs'",
         );
     }
-    if !exceptions.allows("test-redirect", relative) {
+    if !is_support_file && !contains_tests && !exceptions.allows("test-redirect", relative) {
         for (line, value) in text.lines().enumerate() {
             let trimmed = value.trim_start();
             if trimmed.starts_with("include!(") || trimmed.starts_with("#[path") {
@@ -589,6 +740,18 @@ fn check_test_file(relative: &str, text: &str, exceptions: &ExceptionConfig, dia
     }
 }
 
+/// Detects test attributes even when a file only declares an external module.
+fn contains_test_attributes(text: &str) -> bool {
+    text.lines().any(|value| {
+        let trimmed = value.trim_start();
+        trimmed.starts_with("#[cfg(test")
+            || trimmed.starts_with("#[test")
+            || trimmed.starts_with("#[rstest")
+            || trimmed.contains("::test]")
+            || trimmed.contains("::test(")
+    })
+}
+
 /// Detects conventional test functions, including functions in inline modules.
 fn contains_test_functions(text: &str) -> bool {
     let Ok(file) = parse_file(text) else {
@@ -600,19 +763,37 @@ fn contains_test_functions(text: &str) -> bool {
 /// Recursively checks Rust items for test and rstest function attributes.
 fn items_contain_test_functions(items: &[syn::Item]) -> bool {
     items.iter().any(|item| match item {
-        syn::Item::Fn(function) => function.attrs.iter().any(|attribute| {
-            attribute
-                .path()
-                .segments
-                .last()
-                .is_some_and(|segment| matches!(segment.ident.to_string().as_str(), "test" | "rstest"))
-        }),
+        syn::Item::Fn(function) => {
+            function.attrs.iter().any(|attribute| {
+                attribute
+                    .path()
+                    .segments
+                    .last()
+                    .is_some_and(|segment| matches!(segment.ident.to_string().as_str(), "test" | "rstest"))
+            }) || function.attrs.iter().any(|attribute| {
+                attribute.path().is_ident("cfg")
+                    && attribute
+                        .meta
+                        .require_list()
+                        .is_ok_and(|list| list.tokens.to_string().contains("test"))
+            })
+        }
         syn::Item::Mod(module) => module
             .content
             .as_ref()
             .is_some_and(|(_, nested)| items_contain_test_functions(nested)),
         _ => false,
     })
+}
+
+/// Reads a legacy boolean style switch from the process environment.
+fn env_flag(name: &str, default: bool) -> bool {
+    match std::env::var(name).ok().as_deref() {
+        Some("0") | Some("false") | Some("False") | Some("FALSE") => false,
+        Some("1") | Some("true") | Some("True") | Some("TRUE") => true,
+        Some(_) => default,
+        None => default,
+    }
 }
 
 /// Checks import shape and ordering in one project-owned Rust file.
@@ -643,7 +824,10 @@ fn check_imports(relative: &str, text: &str, exceptions: &ExceptionConfig, diagn
         if trimmed.starts_with("#[") && last_group.is_some() {
             continue;
         }
-        if let Some(path) = trimmed.strip_prefix("use ").and_then(|value| value.strip_suffix(';')) {
+        let import = trimmed
+            .strip_prefix("use ")
+            .or_else(|| trimmed.strip_prefix("pub use "));
+        if let Some(path) = import.and_then(|value| value.strip_suffix(';')) {
             if path.contains('{') {
                 add(
                     diagnostics,
@@ -704,6 +888,49 @@ fn check_imports(relative: &str, text: &str, exceptions: &ExceptionConfig, diagn
             );
         }
     }
+    if relative.ends_with("/mod.rs") && !has_aggregation_items(text) {
+        for (line, value) in text.lines().enumerate() {
+            let trimmed = value.trim_start();
+            if trimmed.starts_with("use ") {
+                add(
+                    diagnostics,
+                    "STYLE016",
+                    relative,
+                    line + 1,
+                    "aggregation-only mod.rs files must not collect private imports for child modules",
+                );
+            }
+        }
+    }
+}
+
+/// Returns whether an aggregation file contains a concrete top-level item.
+fn has_aggregation_items(text: &str) -> bool {
+    text.lines().any(|value| {
+        let trimmed = value.trim_start();
+        [
+            "async fn ",
+            "fn ",
+            "struct ",
+            "enum ",
+            "trait ",
+            "type ",
+            "const ",
+            "static ",
+            "impl ",
+            "macro_rules!",
+            "pub fn ",
+            "pub struct ",
+            "pub enum ",
+            "pub trait ",
+            "pub type ",
+            "pub const ",
+            "pub static ",
+            "pub impl ",
+        ]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+    })
 }
 
 /// Ensures aggregation files contain only declarations and re-exports.
@@ -723,42 +950,22 @@ fn check_aggregation(relative: &str, text: &str, exceptions: &ExceptionConfig, d
     if exceptions.allows("aggregation-files", relative) {
         return;
     }
-    for (line, value) in text.lines().enumerate() {
-        let trimmed = value.trim_start();
-        if trimmed.starts_with("//")
-            || trimmed.starts_with("pub mod ")
-            || trimmed.starts_with("mod ")
-            || trimmed.starts_with("pub use ")
-            || trimmed.starts_with("use ")
-            || trimmed.starts_with("#")
-            || trimmed.is_empty()
-        {
-            continue;
-        }
-        if [
-            "fn ",
-            "pub fn ",
-            "struct ",
-            "pub struct ",
-            "enum ",
-            "pub enum ",
-            "trait ",
-            "pub trait ",
-            "type ",
-            "pub type ",
-            "const ",
-            "static ",
-            "impl ",
-            "macro_rules!",
-        ]
-        .iter()
-        .any(|prefix| trimmed.starts_with(prefix))
-        {
+    let Ok(file) = parse_file(text) else {
+        return;
+    };
+    for item in file.items {
+        let allowed = matches!(&item, Item::Mod(_) | Item::Use(_))
+            || matches!(&item, Item::Fn(function) if function.attrs.iter().any(|attribute| {
+                attribute.path().segments.last().is_some_and(|segment| {
+                    matches!(segment.ident.to_string().as_str(), "proc_macro" | "proc_macro_attribute" | "proc_macro_derive")
+                })
+            }));
+        if !allowed {
             add(
                 diagnostics,
                 "STYLE009",
                 relative,
-                line + 1,
+                0,
                 "lib.rs and mod.rs files must only declare modules and re-export items",
             );
         }
@@ -802,7 +1009,7 @@ fn check_type_layout(
         })
         .collect();
     if types.len() > 1 {
-        if exceptions.allows("public-type-layout", relative) {
+        if exceptions.allows("public-type-layout", relative) || exceptions.allows("multiple-public-types", relative) {
             return;
         }
         add(

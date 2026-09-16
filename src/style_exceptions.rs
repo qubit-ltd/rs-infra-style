@@ -97,11 +97,14 @@ pub(crate) fn known_rule(rule: &str) -> bool {
     matches!(
         rule,
         "coverage-cfg"
+            | "inline-tests"
+            | "source-test-pair"
             | "test-file-name"
             | "test-redirect"
             | "explicit-imports"
             | "aggregation-files"
             | "public-type-layout"
+            | "multiple-public-types"
             | "type-file-name"
             | "internal-test-module"
     )
