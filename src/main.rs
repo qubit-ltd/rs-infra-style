@@ -22,30 +22,49 @@ use crate::command::Command;
 use crate::format::Format;
 
 /// Parses arguments and executes the requested style operation.
-///
-/// # Errors
-///
-/// Returns an error when the project cannot be canonicalized, when Cargo or
-/// rustfmt fails, or when diagnostic output cannot be serialized.
-fn main() -> Result<()> {
+fn main() {
     let cli = Cli::parse();
+    let json = cli.format == Format::Json;
+    let is_check = matches!(&cli.command, Command::Check);
+    match run(cli) {
+        Ok(success) => {
+            if json {
+                eprintln!(
+                    "Rust style checks {}.",
+                    if success { "passed" } else { "failed" }
+                );
+            } else if success && !is_check {
+                println!("Rust style operation completed successfully.");
+            }
+            if !success {
+                std::process::exit(1);
+            }
+        }
+        Err(error) => {
+            eprintln!("Rust style operation failed: {error:#}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Executes one CLI operation and returns whether it passed its checks.
+fn run(cli: Cli) -> Result<bool> {
     let project = std::fs::canonicalize(&cli.project)?;
     match cli.command {
         Command::Check => {
             let diagnostics =
                 check_project(&project, cli.source_dir.as_deref(), cli.test_dir.as_deref())?;
             print_diagnostics(&diagnostics, cli.format == Format::Json)?;
-            if diagnostics.is_empty() {
-                Ok(())
-            } else {
-                std::process::exit(1)
-            }
+            Ok(diagnostics.is_empty())
         }
-        Command::Fix { dry_run } => fix_project(
-            &project,
-            cli.source_dir.as_deref(),
-            cli.test_dir.as_deref(),
-            dry_run,
-        ),
+        Command::Fix { dry_run } => {
+            fix_project(
+                &project,
+                cli.source_dir.as_deref(),
+                cli.test_dir.as_deref(),
+                dry_run,
+            )?;
+            Ok(true)
+        }
     }
 }

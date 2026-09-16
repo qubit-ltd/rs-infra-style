@@ -168,6 +168,6 @@ fn test_formatter_dry_run_shows_contract_without_running_cargo() {
     assert!(result.status.success(), "dry run must not invoke cargo");
     assert_eq!(
         String::from_utf8(result.stdout).expect("command text"),
-        "cargo +nightly-2026-06-05 fmt --all -- --config-path \"shared config.toml\"\n"
+        "cargo +nightly-2026-06-05 fmt --all -- --config-path \"shared config.toml\"\nRust style operation completed successfully.\n"
     );
 }
