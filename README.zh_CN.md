@@ -9,6 +9,12 @@
 
 检查并安全修正 Qubit 项目当前第一阶段的固定 Rust 风格规则。
 
+本工具随附的 Rust 风格权威标准位于
+[`doc/style-standard/`](doc/style-standard/)。该目录同步自
+`reviewing-rust-code-style` skill，包含编码规范、Rust 文件头模板和双语
+README 结构。检查器是机械门禁，只报告能够根据项目文件确定证明的违规；
+语义、性能、所有权和测试质量仍由完整 skill 审查判断。
+
 ## 安装
 
 ```bash
@@ -67,10 +73,12 @@ rs-infra-style --project . fix
 
 ## 能力与限制
 
-当前版本保留旧 `rs-ci/style-check.sh` 的风格规则，包括可选的环境开关
-`STYLE_ENFORCE_INLINE_TESTS` 和 `STYLE_ENFORCE_SOURCE_TEST_PAIRS`。项目例外放在
-`.infra/style/exceptions.toml`；Clippy、coverage 和 Cargo.lock 更新等编排仍由
-`rs-infra-ci` 负责。
+当前版本保留可机械化处理的旧 `rs-ci/style-check.sh` 规则和可选的
+`STYLE_ENFORCE_SOURCE_TEST_PAIRS` 兼容开关。由于 skill 允许确有 private
+访问需求的 inline test，工具不会自动禁止所有 inline test。项目例外放在
+`.infra/style/exceptions.toml`；coverage 例外还必须有源码中的
+`qubit-style: allow coverage-cfg` 注释。Clippy、coverage 和 Cargo.lock 更新等
+编排仍由 `rs-infra-ci` 负责。
 
 ## 延伸阅读
 

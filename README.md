@@ -9,6 +9,14 @@
 
 Check and safely correct the first-generation fixed Rust style rules used by Qubit projects.
 
+The authoritative Rust style standard shipped with this tool is in
+[`doc/style-standard/`](doc/style-standard/). It is synchronized from the
+`reviewing-rust-code-style` skill and includes the coding rules, Rust file
+header template, and bilingual README structure. The checker is a mechanical
+gate: it reports only violations that it can prove from the project files.
+Semantic, performance, ownership, and test-quality judgments remain part of
+the full skill review.
+
 ## Installation
 
 ```bash
@@ -76,11 +84,14 @@ and `fix --dry-run` displays the configured command without running it.
 
 ## Capabilities and limitations
 
-This release preserves the legacy `rs-ci/style-check.sh` rules, including the
-opt-in environment switches `STYLE_ENFORCE_INLINE_TESTS` and
-`STYLE_ENFORCE_SOURCE_TEST_PAIRS`. Project-specific exceptions belong in
-`.infra/style/exceptions.toml`; orchestration such as Clippy, coverage, and
-Cargo.lock updates remains the responsibility of `rs-infra-ci`.
+This release preserves the mechanical legacy rules and the opt-in
+`STYLE_ENFORCE_SOURCE_TEST_PAIRS` compatibility switch. Inline test placement
+is not rejected automatically because the skill allows inline tests when
+private access is necessary. Project-specific exceptions belong in
+`.infra/style/exceptions.toml`; coverage exceptions additionally require a
+source `qubit-style: allow coverage-cfg` comment. Orchestration such as
+Clippy, coverage, and Cargo.lock updates remains the responsibility of
+`rs-infra-ci`.
 
 ## Learn More
 
