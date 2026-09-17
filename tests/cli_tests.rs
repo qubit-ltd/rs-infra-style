@@ -10,6 +10,8 @@ use std::process::Command;
 
 use tempfile::tempdir;
 
+const RUST_HEADER: &str = "// =============================================================================\n//    Copyright (c) 2025 - 2026 Haixing Hu.\n//\n//    SPDX-License-Identifier: Apache-2.0\n//\n//    Licensed under the Apache License, Version 2.0.\n// =============================================================================\n";
+
 #[test]
 fn fix_cli_forwards_explicit_style_directories() {
     let directory = tempdir().expect("temporary project");
@@ -53,7 +55,7 @@ fn formatter_project() -> tempfile::TempDir {
     .expect("manifest");
     fs::write(
         directory.path().join("src/main.rs"),
-        "fn main() {\n    let _value = 1;\n}\n",
+        format!("{RUST_HEADER}fn main() {{\n    let _value = 1;\n}}\n"),
     )
     .expect("source");
     directory
@@ -82,7 +84,7 @@ fn test_formatter_config_controls_fix_and_check() {
     }
     assert_eq!(
         fs::read_to_string(project.path().join("src/main.rs")).expect("formatted source"),
-        "fn main() {\n  let _value = 1;\n}\n"
+        format!("{RUST_HEADER}fn main() {{\n  let _value = 1;\n}}\n")
     );
 }
 
@@ -199,9 +201,9 @@ fn test_legacy_style_rules_are_reported() {
         .expect("run style checker");
 
     let stderr = String::from_utf8_lossy(&result.stdout);
-    assert!(!result.status.success(), "legacy inline-test rule must fail");
-    assert!(stderr.contains("inline test attributes are not allowed"), "{stderr}");
+    assert!(!result.status.success(), "wildcard import rule must fail");
     assert!(stderr.contains("wildcard imports are not allowed"), "{stderr}");
+    assert!(!stderr.contains("inline test attributes are not allowed"), "{stderr}");
 }
 
 #[test]

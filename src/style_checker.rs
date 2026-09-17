@@ -53,6 +53,8 @@ enum RootKind {
     Source,
     /// External or crate-internal test files.
     Tests,
+    /// Benchmarks, fuzz targets, examples, and other project-owned Rust files.
+    Other,
 }
 
 /// Checks the configured source and test trees without invoking rustfmt.
@@ -92,8 +94,9 @@ pub fn check(project: &Path, source_dir: Option<&Path>, test_dir: Option<&Path>)
     } else {
         vec![(project.join("src"), project.join("tests"))]
     };
+    let enforce_headers = project.join("Cargo.toml").is_file();
     for (source, tests) in roots {
-        check_package_roots(project, &source, &tests, &exceptions, &mut diagnostics)?;
+        check_package_roots(project, &source, &tests, &exceptions, enforce_headers, &mut diagnostics)?;
     }
     Ok(diagnostics)
 }
@@ -231,16 +234,49 @@ fn check_package_roots(
     source: &Path,
     tests: &Path,
     exceptions: &ExceptionConfig,
+    enforce_headers: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<()> {
-    check_root(project, source, RootKind::Source, exceptions, diagnostics)?;
+    check_root(
+        project,
+        source,
+        RootKind::Source,
+        exceptions,
+        enforce_headers,
+        diagnostics,
+    )?;
     let internal_tests = source.join("tests");
     if internal_tests.is_dir() {
         check_internal_test_module(project, source, exceptions, diagnostics);
-        check_root(project, &internal_tests, RootKind::Tests, exceptions, diagnostics)?;
+        check_root(
+            project,
+            &internal_tests,
+            RootKind::Tests,
+            exceptions,
+            enforce_headers,
+            diagnostics,
+        )?;
     }
     if tests != internal_tests {
-        check_root(project, tests, RootKind::Tests, exceptions, diagnostics)?;
+        check_root(
+            project,
+            tests,
+            RootKind::Tests,
+            exceptions,
+            enforce_headers,
+            diagnostics,
+        )?;
+    }
+    let package_root = source.parent().unwrap_or(source);
+    for directory in ["benches", "fuzz", "examples"] {
+        check_root(
+            project,
+            &package_root.join(directory),
+            RootKind::Other,
+            exceptions,
+            enforce_headers,
+            diagnostics,
+        )?;
     }
     check_source_test_pairs(project, source, tests, exceptions, diagnostics)?;
     Ok(())
@@ -535,18 +571,16 @@ fn check_root(
     root: &Path,
     kind: RootKind,
     exceptions: &ExceptionConfig,
+    enforce_headers: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<()> {
     if !root.is_dir() {
         return Ok(());
     }
-    for entry in WalkDir::new(root)
-        .into_iter()
-        .filter_entry(|entry| {
-            !entry.file_type().is_dir() || !matches!(entry.file_name().to_str(), Some("target" | ".git"))
-        })
-        .filter_map(Result::ok)
-    {
+    for entry in WalkDir::new(root).into_iter().filter_entry(|entry| {
+        !entry.file_type().is_dir() || !matches!(entry.file_name().to_str(), Some("target" | ".git"))
+    }) {
+        let entry = entry.context("failed to walk style source tree")?;
         let path = entry.path();
         if kind == RootKind::Source
             && path
@@ -563,8 +597,9 @@ fn check_root(
         let text = fs::read_to_string(path)?;
         let relative = project_relative_path(project, path);
         match kind {
-            RootKind::Source => check_source_file(&relative, path, &text, exceptions, diagnostics),
-            RootKind::Tests => check_test_file(&relative, &text, exceptions, diagnostics),
+            RootKind::Source => check_source_file(&relative, path, &text, exceptions, enforce_headers, diagnostics),
+            RootKind::Tests => check_test_file(&relative, &text, exceptions, enforce_headers, diagnostics),
+            RootKind::Other => check_common_file(&relative, &text, exceptions, enforce_headers, diagnostics),
         }
     }
     Ok(())
@@ -647,10 +682,11 @@ fn check_source_file(
     path: &Path,
     text: &str,
     exceptions: &ExceptionConfig,
+    enforce_headers: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    check_inline_tests(relative, text, exceptions, diagnostics);
-    if !exceptions.allows("coverage-cfg", relative) {
+    check_common_file(relative, text, exceptions, enforce_headers, diagnostics);
+    if !coverage_exception_allowed(relative, text, exceptions) {
         for (line, value) in text.lines().enumerate() {
             if value.trim_start().starts_with("#[cfg") && value.contains("coverage")
                 || value.trim_start().starts_with("#[cfg_attr") && value.contains("coverage")
@@ -665,33 +701,66 @@ fn check_source_file(
             }
         }
     }
-    check_imports(relative, text, exceptions, diagnostics);
     check_aggregation(relative, text, exceptions, diagnostics);
     check_type_layout(relative, path, text, exceptions, diagnostics);
 }
 
-/// Enforces the legacy opt-in rule that test code must not live in `src/`.
-fn check_inline_tests(relative: &str, text: &str, exceptions: &ExceptionConfig, diagnostics: &mut Vec<Diagnostic>) {
-    if !env_flag("STYLE_ENFORCE_INLINE_TESTS", false) || exceptions.allows("inline-tests", relative) {
-        return;
+/// Applies checks that are mechanically valid for every project-owned Rust
+/// file.
+fn check_common_file(
+    relative: &str,
+    text: &str,
+    exceptions: &ExceptionConfig,
+    enforce_headers: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if enforce_headers {
+        check_file_header(relative, text, diagnostics);
     }
-    for (line, value) in text.lines().enumerate() {
-        let trimmed = value.trim_start();
-        let is_test_attribute = trimmed.starts_with("#[cfg(test")
-            || trimmed.starts_with("#[test")
-            || trimmed.starts_with("#[rstest")
-            || trimmed.contains("::test]")
-            || trimmed.contains("::test(");
-        if is_test_attribute {
-            add(
-                diagnostics,
-                "STYLE013",
-                relative,
-                line + 1,
-                "test code must live under 'tests/'; inline test attributes are not allowed in source",
-            );
-        }
+    check_imports(relative, text, exceptions, diagnostics);
+}
+
+/// Checks the exact accepted Rust file header from the repository standard.
+fn check_file_header(relative: &str, text: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let lines: Vec<_> = text.lines().take(8).collect();
+    let valid = lines.len() >= 7
+        && lines[0] == "// ============================================================================="
+        && valid_copyright_line(lines[1])
+        && lines[2] == "//"
+        && lines[3] == "//    SPDX-License-Identifier: Apache-2.0"
+        && lines[4] == "//"
+        && lines[5] == "//    Licensed under the Apache License, Version 2.0."
+        && lines[6] == "// =============================================================================";
+    if !valid {
+        add(
+            diagnostics,
+            "DOC-001",
+            relative,
+            1,
+            "Rust files must begin with the accepted seven-line copyright and license header",
+        );
     }
+}
+
+fn valid_copyright_line(line: &str) -> bool {
+    let Some(value) = line.strip_prefix("//    Copyright (c) ") else {
+        return false;
+    };
+    let Some(years) = value.strip_suffix(" Haixing Hu.") else {
+        return false;
+    };
+    let parts: Vec<_> = years.split(" - ").collect();
+    (parts.len() == 1 || parts.len() == 2)
+        && parts
+            .iter()
+            .all(|part| part.len() == 4 && part.parse::<u16>().is_ok_and(|year| year >= 2025))
+}
+
+fn coverage_exception_allowed(relative: &str, text: &str, exceptions: &ExceptionConfig) -> bool {
+    exceptions.allows("coverage-cfg", relative)
+        && text
+            .lines()
+            .any(|line| line.contains("qubit-style: allow coverage-cfg"))
 }
 
 /// Applies naming and source-redirection rules to one test file.
@@ -705,7 +774,14 @@ fn check_inline_tests(relative: &str, text: &str, exceptions: &ExceptionConfig, 
 /// * `text` - Complete test source contents to inspect.
 /// * `exceptions` - Exact project-local exceptions for supported rules.
 /// * `diagnostics` - Mutable diagnostic collection to append to.
-fn check_test_file(relative: &str, text: &str, exceptions: &ExceptionConfig, diagnostics: &mut Vec<Diagnostic>) {
+fn check_test_file(
+    relative: &str,
+    text: &str,
+    exceptions: &ExceptionConfig,
+    enforce_headers: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    check_common_file(relative, text, exceptions, enforce_headers, diagnostics);
     let is_support_file = relative
         .split('/')
         .any(|part| matches!(part, "support" | "common" | "fixtures" | "coverage_support"));
@@ -724,7 +800,7 @@ fn check_test_file(relative: &str, text: &str, exceptions: &ExceptionConfig, dia
             "test files should be named '*_tests.rs' or 'mod.rs'",
         );
     }
-    if !is_support_file && !contains_tests && !exceptions.allows("test-redirect", relative) {
+    if !is_support_file && !exceptions.allows("test-redirect", relative) {
         for (line, value) in text.lines().enumerate() {
             let trimmed = value.trim_start();
             if trimmed.starts_with("include!(") || trimmed.starts_with("#[path") {
@@ -1168,6 +1244,94 @@ mod tests {
         assert_eq!(1, diagnostics.len());
         assert_eq!("STYLE001", diagnostics[0].code);
         assert_eq!("tests/wrong_name.rs", diagnostics[0].path);
+    }
+
+    #[test]
+    fn test_redirect_is_reported_even_when_file_contains_a_test() {
+        let directory = tempfile::tempdir().unwrap();
+        let tests = directory.path().join("tests");
+        fs::create_dir_all(&tests).unwrap();
+        fs::write(
+            tests.join("redirect_tests.rs"),
+            "#[test]\nfn test_example() {}\ninclude!(\"shared.rs\");\n",
+        )
+        .unwrap();
+
+        let diagnostics = check(directory.path(), None, None).unwrap();
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| { item.path == "tests/redirect_tests.rs" && item.code == "STYLE002" })
+        );
+    }
+
+    #[test]
+    fn checks_benchmark_files_for_explicit_imports() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("src")).unwrap();
+        fs::create_dir_all(directory.path().join("benches")).unwrap();
+        fs::write(directory.path().join("src/lib.rs"), "pub fn value() {}\n").unwrap();
+        fs::write(directory.path().join("benches/value.rs"), "use std::*;\n").unwrap();
+
+        let diagnostics = check(directory.path(), None, None).unwrap();
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| { item.path == "benches/value.rs" && item.code == "STYLE004" })
+        );
+    }
+
+    #[test]
+    fn missing_rust_header_is_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("src")).unwrap();
+        fs::write(
+            directory.path().join("Cargo.toml"),
+            "[package]\nname = \"header-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::write(directory.path().join("src/lib.rs"), "pub fn value() {}\n").unwrap();
+
+        let diagnostics = check(directory.path(), None, None).unwrap();
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| { item.path == "src/lib.rs" && item.code == "DOC-001" })
+        );
+    }
+
+    #[test]
+    fn coverage_exception_requires_source_allow_comment() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("src");
+        fs::create_dir_all(directory.path().join(".infra/style")).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            directory.path().join("Cargo.toml"),
+            "[package]\nname = \"coverage-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::write(
+            directory.path().join(".infra/style/exceptions.toml"),
+            "format = 1\n\n[[exceptions]]\nrule = \"coverage-cfg\"\npath = \"src/lib.rs\"\nreason = \"Coverage-only compatibility branch.\"\n",
+        )
+        .unwrap();
+        fs::write(
+            source.join("lib.rs"),
+            "// =============================================================================\n//    Copyright (c) 2025 - 2026 Haixing Hu.\n//\n//    SPDX-License-Identifier: Apache-2.0\n//\n//    Licensed under the Apache License, Version 2.0.\n// =============================================================================\n#[cfg(coverage)]\npub fn value() {}\n",
+        )
+        .unwrap();
+
+        let diagnostics = check(directory.path(), None, None).unwrap();
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| { item.path == "src/lib.rs" && item.code == "STYLE008" })
+        );
     }
 
     #[test]
