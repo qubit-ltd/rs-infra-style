@@ -42,6 +42,10 @@ fn fix_cli_forwards_explicit_style_directories() {
     assert!(!result.status.success(), "custom source violation must fail");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("style checks still report"), "{stderr}");
+    assert!(
+        stderr.contains("custom-src/wrong.rs:1: wildcard imports are not allowed"),
+        "{stderr}"
+    );
 }
 
 /// Creates a dependency-free project for formatter subprocess tests.

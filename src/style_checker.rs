@@ -209,7 +209,24 @@ pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&
     run_cargo_fmt(project, false)?;
     let diagnostics = check(project, source_dir, test_dir)?;
     if !diagnostics.is_empty() {
-        bail!("style checks still report {} issue(s)", diagnostics.len());
+        let details = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                if diagnostic.line == 0 {
+                    format!("error: {}: {}", diagnostic.path, diagnostic.message)
+                } else {
+                    format!(
+                        "error: {}:{}: {}",
+                        diagnostic.path, diagnostic.line, diagnostic.message
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "style checks still report {} issue(s):\n{details}",
+            diagnostics.len()
+        );
     }
     Ok(())
 }
