@@ -42,6 +42,7 @@ fn fix_cli_forwards_explicit_style_directories() {
     assert!(!result.status.success(), "custom source violation must fail");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("style checks still report"), "{stderr}");
+    assert!(stderr.starts_with("❌ Rust style operation failed:"), "{stderr}");
     assert!(
         stderr.contains("custom-src/wrong.rs:1: wildcard imports are not allowed"),
         "{stderr}"
@@ -85,6 +86,25 @@ fn test_formatter_config_controls_fix_and_check() {
             "{operation}: {}",
             String::from_utf8_lossy(&result.stderr)
         );
+        if operation == "fix" {
+            assert!(
+                String::from_utf8_lossy(&result.stdout).contains("✅ Rust style operation completed successfully."),
+                "{}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+        } else if success {
+            assert!(
+                String::from_utf8_lossy(&result.stdout).contains("✅ Rust style checks passed."),
+                "{}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+        } else {
+            assert!(
+                String::from_utf8_lossy(&result.stderr).starts_with("❌ Rust style operation failed:"),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
     }
     assert_eq!(
         fs::read_to_string(project.path().join("src/main.rs")).expect("formatted source"),
@@ -166,7 +186,7 @@ fn test_formatter_dry_run_shows_contract_without_running_cargo() {
     assert_eq!(
         String::from_utf8(result.stdout).expect("command text"),
         format!(
-            "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml -- --config-path \"shared config.toml\"\nRust style operation completed successfully.\n",
+            "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml -- --config-path \"shared config.toml\"\n✅ Rust style operation completed successfully.\n",
             project.path().display()
         )
     );
@@ -206,6 +226,7 @@ fn test_legacy_style_rules_are_reported() {
 
     let stderr = String::from_utf8_lossy(&result.stdout);
     assert!(!result.status.success(), "wildcard import rule must fail");
+    assert!(stderr.contains("❌ Rust style checks failed with"), "{stderr}");
     assert!(stderr.contains("wildcard imports are not allowed"), "{stderr}");
     assert!(!stderr.contains("inline test attributes are not allowed"), "{stderr}");
 }

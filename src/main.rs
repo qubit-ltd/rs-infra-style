@@ -29,16 +29,20 @@ fn main() {
     match run(cli) {
         Ok(success) => {
             if json {
-                eprintln!("Rust style checks {}.", if success { "passed" } else { "failed" });
+                let icon = if success { "✅" } else { "❌" };
+                eprintln!(
+                    "{icon} Rust style checks {}.",
+                    if success { "passed" } else { "failed" }
+                );
             } else if success && !is_check {
-                println!("Rust style operation completed successfully.");
+                println!("✅ Rust style operation completed successfully.");
             }
             if !success {
                 std::process::exit(1);
             }
         }
         Err(error) => {
-            eprintln!("Rust style operation failed: {error:#}");
+            eprintln!("❌ Rust style operation failed: {error:#}");
             std::process::exit(1);
         }
     }

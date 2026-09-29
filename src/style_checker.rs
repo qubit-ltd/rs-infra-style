@@ -153,9 +153,9 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], json: bool) -> Result<()> {
             }
         }
         if diagnostics.is_empty() {
-            println!("Rust style checks passed.");
+            println!("✅ Rust style checks passed.");
         } else {
-            println!("Rust style checks failed with {} issue(s).", diagnostics.len());
+            println!("❌ Rust style checks failed with {} issue(s).", diagnostics.len());
         }
     }
     Ok(())
@@ -215,18 +215,12 @@ pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&
                 if diagnostic.line == 0 {
                     format!("error: {}: {}", diagnostic.path, diagnostic.message)
                 } else {
-                    format!(
-                        "error: {}:{}: {}",
-                        diagnostic.path, diagnostic.line, diagnostic.message
-                    )
+                    format!("error: {}:{}: {}", diagnostic.path, diagnostic.line, diagnostic.message)
                 }
             })
             .collect::<Vec<_>>()
             .join("\n");
-        bail!(
-            "style checks still report {} issue(s):\n{details}",
-            diagnostics.len()
-        );
+        bail!("style checks still report {} issue(s):\n{details}", diagnostics.len());
     }
     Ok(())
 }
