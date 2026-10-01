@@ -7,6 +7,7 @@
     ".infra/ci/cargo-matrix.json",
     ".infra/ci/ci.toml",
     ".infra/ci/tool.toml",
+    ".infra/ci.toml",
     ".infra/coverage/tool.toml",
     ".infra/dependency/policy.toml",
     ".infra/dependency/tool.toml",
