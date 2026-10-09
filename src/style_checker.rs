@@ -203,7 +203,8 @@ pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
 /// or a selected project file cannot be read.
 pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&Path>, dry_run: bool) -> Result<()> {
     if dry_run {
-        println!("{}", cargo_fmt_description(&cargo_fmt_command(project, false)));
+        let config = project_rustfmt_config(project)?;
+        println!("{}", cargo_fmt_description(&cargo_fmt_command(project, false, &config)));
         return Ok(());
     }
     run_cargo_fmt(project, false)?;
@@ -474,10 +475,11 @@ fn check_internal_test_module(
 /// Returns an error when Cargo or rustfmt cannot be started or exits with a
 /// failure status.
 fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
-    run_formatter_command(cargo_fmt_command(project, check_only), project)?;
+    let config = project_rustfmt_config(project)?;
+    run_formatter_command(cargo_fmt_command(project, check_only, &config), project)?;
     let fuzz_manifest = project.join("fuzz/Cargo.toml");
     if fuzz_manifest.is_file() {
-        run_formatter_command(cargo_fuzz_fmt_command(&fuzz_manifest, check_only), project)?;
+        run_formatter_command(cargo_fuzz_fmt_command(&fuzz_manifest, check_only, &config), project)?;
     }
     Ok(())
 }
@@ -495,13 +497,25 @@ fn run_formatter_command(mut command: Command, project: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Builds a formatter command using optional toolchain and configuration
-/// overrides.
+/// Resolves the required formatter configuration installed in a project.
 ///
-/// `check_only` selects validation instead of rewriting. Environment values are
-/// passed as individual arguments; relative configuration paths are resolved by
-/// rustfmt from the project directory. Empty values retain Cargo's defaults.
-fn cargo_fmt_command(project: &Path, check_only: bool) -> Command {
+/// Returns an absolute path so Cargo can run from the project directory even
+/// when `project` was supplied as a relative path. Missing configuration is an
+/// error because the bootstrap updater owns this shared file.
+fn project_rustfmt_config(project: &Path) -> Result<PathBuf> {
+    let path = project.join(".infra/style/rustfmt.toml");
+    if !path.is_file() {
+        bail!("missing {}: run ./update-infra.sh to install the shared rustfmt configuration", path.display());
+    }
+    path.canonicalize()
+        .with_context(|| format!("failed to resolve formatter configuration {}", path.display()))
+}
+
+/// Builds a formatter command using the project's installed configuration.
+///
+/// `check_only` selects validation instead of rewriting. `config` is an
+/// absolute path obtained from the project before Cargo changes directory.
+fn cargo_fmt_command(project: &Path, check_only: bool, config: &Path) -> Command {
     let mut command = Command::new("cargo");
     if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
         let mut argument = std::ffi::OsString::from("+");
@@ -510,21 +524,16 @@ fn cargo_fmt_command(project: &Path, check_only: bool) -> Command {
     }
     command.args(["fmt", "--all", "--manifest-path"]);
     command.arg(project.join("Cargo.toml"));
-    let config = std::env::var_os("RS_INFRA_STYLE_RUSTFMT_CONFIG").filter(|value| !value.is_empty());
-    if check_only || config.is_some() {
-        command.arg("--");
-    }
+    command.arg("--");
     if check_only {
         command.arg("--check");
     }
-    if let Some(config) = config {
-        command.arg("--config-path").arg(config);
-    }
+    command.arg("--config-path").arg(config);
     command
 }
 
 /// Builds the legacy second formatter invocation for a standalone fuzz crate.
-fn cargo_fuzz_fmt_command(manifest: &Path, check_only: bool) -> Command {
+fn cargo_fuzz_fmt_command(manifest: &Path, check_only: bool, config: &Path) -> Command {
     let mut command = Command::new("cargo");
     if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
         let mut argument = std::ffi::OsString::from("+");
@@ -537,10 +546,7 @@ fn cargo_fuzz_fmt_command(manifest: &Path, check_only: bool) -> Command {
     if check_only {
         command.arg("--check");
     }
-    if let Some(config) = std::env::var_os("RS_INFRA_STYLE_RUSTFMT_CONFIG").filter(|value| !value.is_empty()) {
-        command.args(["--config-path"]);
-        command.arg(config);
-    }
+    command.arg("--config-path").arg(config);
     command
 }
 

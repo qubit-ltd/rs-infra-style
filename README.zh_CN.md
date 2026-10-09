@@ -51,25 +51,27 @@ reason = "该测试入口必须引入外部测试框架共用的 fixture。"
 `public-type-layout`、`multiple-public-types`、`type-file-name` 和
 `internal-test-module`。只有路径和规则同时精确匹配时才会忽略诊断；格式错误或不支持的例外会使检查失败。
 
-## 固定格式化工具和配置
+## 统一格式化配置
 
-迁移后的 wrapper 可通过以下设置，让 `check` 和 `fix` 使用同一套 rustfmt 工具链与配置：
+先运行项目更新脚本，将本仓库维护的 [`conf/rustfmt.toml`](conf/rustfmt.toml)
+安装到项目的 `.infra/style/rustfmt.toml`：
+
+```bash
+./update-infra.sh --yes
+```
+
+`check` 和 `fix` 都读取项目中的该文件，并把绝对路径传给 rustfmt。文件缺失时，
+工具会报错并提示运行更新脚本。如需固定 rustfmt 工具链，可单独设置：
 
 ```bash
 export RS_INFRA_STYLE_TOOLCHAIN=nightly-2026-06-05
-export RS_INFRA_STYLE_RUSTFMT_CONFIG="$PWD/.infra/style/rustfmt.toml"
 rs-infra-style --project . check
 rs-infra-style --project . fix
 ```
 
-运行前须安装指定工具链及其 rustfmt 组件。`RS_INFRA_STYLE_TOOLCHAIN` 用于选择
-`cargo +<toolchain> fmt` 的工具链；`RS_INFRA_STYLE_RUSTFMT_CONFIG` 通过
-`--config-path` 指定 rustfmt 配置。这两个变量可分别使用；未设置或值为空时，
-对应部分仍沿用 Cargo 的工具链选择方式或 rustfmt 的默认配置查找方式。
-
-配置路径可以包含空格，相对路径以 `--project` 指定的目录为基准。项目已有根目录
-`rustfmt.toml` 时，可将配置变量指向该文件；工具不会复制或替换配置文件。
-格式化失败会使命令返回失败状态。`fix --dry-run` 只显示配置后的命令，不执行格式化。
+运行前须安装指定工具链及其 rustfmt 组件。`RS_INFRA_STYLE_TOOLCHAIN` 选择
+`cargo +<toolchain> fmt`；未设置或值为空时沿用 Cargo 的工具链选择方式。
+格式化失败会使命令返回失败状态。`fix --dry-run` 只显示命令，不执行 Cargo。
 
 ## 能力与限制
 

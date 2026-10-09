@@ -6,11 +6,20 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 use tempfile::tempdir;
 
 const RUST_HEADER: &str = "// =============================================================================\n//    Copyright (c) 2025 - 2026 Haixing Hu.\n//\n//    SPDX-License-Identifier: Apache-2.0\n//\n//    Licensed under the Apache License, Version 2.0.\n// =============================================================================\n";
+
+/// Installs the project's rustfmt configuration for CLI fixtures.
+fn install_rustfmt(project: &Path, contents: &str) {
+    let config = project.join(".infra/style/rustfmt.toml");
+    fs::create_dir_all(config.parent().expect("configuration directory"))
+        .expect("create configuration directory");
+    fs::write(config, contents).expect("formatter configuration");
+}
 
 #[test]
 fn fix_cli_forwards_explicit_style_directories() {
@@ -25,6 +34,7 @@ fn fix_cli_forwards_explicit_style_directories() {
     .expect("manifest");
     fs::write(directory.path().join("src/lib.rs"), "pub fn value() -> i32 { 1 }\n").expect("crate root");
     fs::write(directory.path().join("custom-src/wrong.rs"), "use std::*;\n").expect("custom source");
+    install_rustfmt(directory.path(), "edition = \"2024\"\n");
 
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .args([
@@ -63,21 +73,54 @@ fn formatter_project() -> tempfile::TempDir {
         format!("{RUST_HEADER}fn main() {{\n    let _value = 1;\n}}\n"),
     )
     .expect("source");
+    install_rustfmt(directory.path(), "tab_spaces = 2\n");
     directory
+}
+
+#[test]
+fn test_formatter_uses_project_rustfmt_config() {
+    let project = formatter_project();
+    let config = project.path().join(".infra/style/rustfmt.toml");
+    let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
+        .arg("--project")
+        .arg(project.path())
+        .args(["fix", "--dry-run"])
+        .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
+        .output()
+        .expect("run formatter dry run");
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let output = String::from_utf8_lossy(&result.stdout);
+    assert!(output.contains("--config-path"), "{output}");
+    assert!(output.contains(config.to_str().expect("configuration path")), "{output}");
+}
+
+#[test]
+fn test_formatter_rejects_missing_project_rustfmt_config() {
+    let project = formatter_project();
+    fs::remove_file(project.path().join(".infra/style/rustfmt.toml"))
+        .expect("remove formatter configuration fixture");
+    let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
+        .arg("--project")
+        .arg(project.path())
+        .args(["fix", "--dry-run"])
+        .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
+        .output()
+        .expect("run formatter dry run");
+    assert!(!result.status.success(), "missing configuration must fail");
+    let error = String::from_utf8_lossy(&result.stderr);
+    assert!(error.contains(".infra/style/rustfmt.toml"), "{error}");
 }
 
 #[test]
 fn test_formatter_config_controls_fix_and_check() {
     let project = formatter_project();
-    let config = project.path().join("shared config.toml");
-    fs::write(&config, "tab_spaces = 2\n").expect("formatter configuration");
     for (operation, success) in [("check", false), ("fix", true), ("check", true)] {
         let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
             .arg("--project")
             .arg(project.path())
             .arg(operation)
             .env_remove("RS_INFRA_STYLE_TOOLCHAIN")
-            .env("RS_INFRA_STYLE_RUSTFMT_CONFIG", "shared config.toml")
+            .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
             .output()
             .expect("run formatter");
         assert_eq!(
@@ -130,7 +173,8 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
     fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).expect("executable cargo");
     let output_path = project.path().join("arguments");
     let manifest_path = project.path().join("Cargo.toml");
-    for (toolchain, config) in [(false, false), (true, false), (false, true), (true, true)] {
+    let config = project.path().join(".infra/style/rustfmt.toml");
+    for toolchain in [false, true] {
         for operation in ["check", "fix"] {
             let mut command = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"));
             command
@@ -146,20 +190,13 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
                 command.env("RS_INFRA_STYLE_TOOLCHAIN", "nightly-2026-06-05");
                 expected.push("+nightly-2026-06-05");
             }
-            if config {
-                command.env("RS_INFRA_STYLE_RUSTFMT_CONFIG", "shared config.toml");
-            }
             expected.extend(["fmt", "--all", "--manifest-path"]);
             expected.push(manifest_path.to_str().expect("manifest path"));
-            if operation == "check" || config {
-                expected.push("--");
-            }
+            expected.push("--");
             if operation == "check" {
                 expected.push("--check");
             }
-            if config {
-                expected.extend(["--config-path", "shared config.toml"]);
-            }
+            expected.extend(["--config-path", config.to_str().expect("configuration path")]);
             let result = command.output().expect("run formatter");
             assert!(!result.status.success(), "formatter failure must propagate");
             assert_eq!(
@@ -179,14 +216,15 @@ fn test_formatter_dry_run_shows_contract_without_running_cargo() {
         .args(["fix", "--dry-run"])
         .env("PATH", project.path())
         .env("RS_INFRA_STYLE_TOOLCHAIN", "nightly-2026-06-05")
-        .env("RS_INFRA_STYLE_RUSTFMT_CONFIG", "shared config.toml")
+        .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
         .output()
         .expect("dry run");
     assert!(result.status.success(), "dry run must not invoke cargo");
     assert_eq!(
         String::from_utf8(result.stdout).expect("command text"),
         format!(
-            "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml -- --config-path \"shared config.toml\"\n✅ Rust style operation completed successfully.\n",
+            "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml -- --config-path {}/.infra/style/rustfmt.toml\n✅ Rust style operation completed successfully.\n",
+            project.path().display(),
             project.path().display()
         )
     );
@@ -209,6 +247,7 @@ fn test_legacy_style_rules_are_reported() {
     )
     .expect("inline test source");
     fs::write(project.path().join("tests/support/helpers.rs"), "fn helper() {}\n").expect("support test");
+    install_rustfmt(project.path(), "edition = \"2024\"\n");
 
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .args([
@@ -243,6 +282,7 @@ fn source_test_pair_rule_is_opt_in_like_legacy_rs_ci() {
     fs::create_dir_all(project.path().join("tests")).expect("test directory");
     fs::write(project.path().join("src/lib.rs"), "pub mod widget;\n").expect("crate root");
     fs::write(project.path().join("src/widget.rs"), "pub struct Widget;\n").expect("source file");
+    install_rustfmt(project.path(), "edition = \"2024\"\n");
 
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .args(["--project", project.path().to_str().expect("project path"), "check"])

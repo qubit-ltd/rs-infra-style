@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "source": "rustfmt.toml",
+      "target": "rustfmt.toml"
+    }
+  ]
+}
