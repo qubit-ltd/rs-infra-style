@@ -17,23 +17,39 @@ use serde::Deserialize;
 const CONFIG_PATH: &str = ".infra/style/exceptions.toml";
 const CONFIG_FORMAT: u8 = 1;
 
+/// Holds the validated style exceptions loaded from a project configuration.
+///
+/// The configuration format must match [`CONFIG_FORMAT`], and every exception
+/// must refer to a known rule and an existing project file.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ExceptionConfig {
+    /// Identifies the schema version used by the configuration file.
     pub(crate) format: u8,
+    /// Lists rule and path pairs whose style findings are intentionally
+    /// allowed.
     #[serde(default)]
     pub(crate) exceptions: Vec<StyleException>,
 }
 
+/// Describes one permitted style exception for a project file.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StyleException {
+    /// Names the style rule that is allowed to have an exception.
     pub(crate) rule: String,
+    /// Gives the project-relative path to which the exception applies.
     pub(crate) path: String,
+    /// Explains why this specific rule and path are exempted.
     pub(crate) reason: String,
 }
 
 impl ExceptionConfig {
+    /// Loads and validates the style exception configuration for a project.
+    ///
+    /// If the configuration file is absent, this returns an empty configuration
+    /// using the current format. File access and TOML parsing errors are
+    /// returned with the configuration path attached as context.
     pub(crate) fn load(project: &Path) -> Result<Self> {
         let path = project.join(CONFIG_PATH);
         if !path.is_file() {
@@ -48,6 +64,7 @@ impl ExceptionConfig {
         Ok(config)
     }
 
+    /// Checks that the format and every exception are valid for the project.
     fn validate(&self, project: &Path) -> Result<()> {
         if self.format != CONFIG_FORMAT {
             bail!(
@@ -93,6 +110,7 @@ impl ExceptionConfig {
         Ok(())
     }
 
+    /// Reports whether the exact rule and project-relative path are exempted.
     pub(crate) fn allows(&self, rule: &str, path: &str) -> bool {
         self.exceptions
             .iter()
@@ -100,6 +118,7 @@ impl ExceptionConfig {
     }
 }
 
+/// Determines whether a rule identifier is recognized by the style checker.
 pub(crate) fn known_rule(rule: &str) -> bool {
     matches!(
         rule,

@@ -214,12 +214,7 @@ pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&
         let toolchain = project_toolchain(project)?;
         println!(
             "{}",
-            cargo_fmt_description(&cargo_fmt_command(
-                project,
-                false,
-                &config,
-                toolchain.as_deref()
-            ))
+            cargo_fmt_description(&cargo_fmt_command(project, false, &config, toolchain.as_deref()))
         );
         return Ok(());
     }
@@ -528,7 +523,10 @@ fn run_formatter_command(mut command: Command, project: &Path) -> Result<()> {
 fn project_rustfmt_config(project: &Path) -> Result<PathBuf> {
     let path = project.join(".infra/style/rustfmt.toml");
     if !path.is_file() {
-        bail!("missing {}: run ./update-infra.sh to install the shared rustfmt configuration", path.display());
+        bail!(
+            "missing {}: run ./update-infra.sh to install the shared rustfmt configuration",
+            path.display()
+        );
     }
     path.canonicalize()
         .with_context(|| format!("failed to resolve formatter configuration {}", path.display()))
@@ -540,9 +538,7 @@ fn project_rustfmt_config(project: &Path) -> Result<PathBuf> {
 /// Otherwise `.infra/tools/defaults.toml` is required; malformed or missing
 /// configuration is reported instead of silently selecting Cargo's default.
 fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
-    if let Some(toolchain) =
-        std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty())
-    {
+    if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
         return Ok(Some(toolchain));
     }
 
@@ -553,10 +549,10 @@ fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
             defaults_path.display()
         );
     }
-    let contents = fs::read_to_string(&defaults_path)
-        .with_context(|| format!("failed to read {}", defaults_path.display()))?;
-    let defaults: ProjectDefaults = toml::from_str(&contents)
-        .with_context(|| format!("failed to parse {}", defaults_path.display()))?;
+    let contents =
+        fs::read_to_string(&defaults_path).with_context(|| format!("failed to read {}", defaults_path.display()))?;
+    let defaults: ProjectDefaults =
+        toml::from_str(&contents).with_context(|| format!("failed to parse {}", defaults_path.display()))?;
     if defaults.nightly_toolchain.is_empty()
         || defaults.nightly_toolchain.starts_with(['+', '-'])
         || defaults.nightly_toolchain.chars().any(char::is_whitespace)
@@ -573,12 +569,7 @@ fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
 ///
 /// `check_only` selects validation instead of rewriting. `config` is an
 /// absolute path obtained from the project before Cargo changes directory.
-fn cargo_fmt_command(
-    project: &Path,
-    check_only: bool,
-    config: &Path,
-    toolchain: Option<&std::ffi::OsStr>,
-) -> Command {
+fn cargo_fmt_command(project: &Path, check_only: bool, config: &Path, toolchain: Option<&std::ffi::OsStr>) -> Command {
     let mut command = Command::new("cargo");
     if let Some(toolchain) = toolchain {
         let mut argument = std::ffi::OsString::from("+");
@@ -722,10 +713,12 @@ fn project_relative_path(project: &Path, path: &Path) -> String {
         .unwrap_or(path)
 }
 
+/// Reports whether a normalized path uses a Windows drive or UNC prefix.
 fn is_windows_path(path: &str) -> bool {
     path.starts_with("//") || (path.as_bytes().get(1) == Some(&b':') && path.as_bytes().get(2) == Some(&b'/'))
 }
 
+/// Converts slash variants to `/` and removes Windows verbatim path prefixes.
 fn normalize_path_separators(path: &str) -> String {
     let mut normalized = String::with_capacity(path.len());
     let mut previous_was_separator = false;
@@ -827,6 +820,7 @@ fn check_file_header(relative: &str, text: &str, diagnostics: &mut Vec<Diagnosti
     }
 }
 
+/// Checks whether a copyright line matches an accepted owner and year range.
 fn valid_copyright_line(line: &str) -> bool {
     let Some(value) = line.strip_prefix("//    Copyright (c) ") else {
         return false;
@@ -841,6 +835,7 @@ fn valid_copyright_line(line: &str) -> bool {
             .all(|part| part.len() == 4 && part.parse::<u16>().is_ok_and(|year| year >= 2025))
 }
 
+/// Requires both a configured exception and its matching source comment.
 fn coverage_exception_allowed(relative: &str, text: &str, exceptions: &ExceptionConfig) -> bool {
     exceptions.allows("coverage-cfg", relative)
         && text
@@ -901,7 +896,7 @@ fn check_test_file(
     }
 }
 
-/// Detects test attributes even when a file only declares an external module.
+/// Detects common test attributes in source text, including module gates.
 fn contains_test_attributes(text: &str) -> bool {
     text.lines().any(|value| {
         let trimmed = value.trim_start();
@@ -913,7 +908,7 @@ fn contains_test_attributes(text: &str) -> bool {
     })
 }
 
-/// Detects conventional test functions, including functions in inline modules.
+/// Parses the file and detects test functions nested in inline modules.
 fn contains_test_functions(text: &str) -> bool {
     let Ok(file) = parse_file(text) else {
         return false;
@@ -921,7 +916,7 @@ fn contains_test_functions(text: &str) -> bool {
     items_contain_test_functions(&file.items)
 }
 
-/// Recursively checks Rust items for test and rstest function attributes.
+/// Recursively searches parsed items for test and rstest function attributes.
 fn items_contain_test_functions(items: &[syn::Item]) -> bool {
     items.iter().any(|item| match item {
         syn::Item::Fn(function) => {
@@ -947,7 +942,8 @@ fn items_contain_test_functions(items: &[syn::Item]) -> bool {
     })
 }
 
-/// Reads a legacy boolean style switch from the process environment.
+/// Reads a boolean environment setting, falling back for unset or unrecognized
+/// values.
 fn env_flag(name: &str, default: bool) -> bool {
     match std::env::var(name).ok().as_deref() {
         Some("0") | Some("false") | Some("False") | Some("FALSE") => false,
@@ -1118,7 +1114,10 @@ fn check_aggregation(relative: &str, text: &str, exceptions: &ExceptionConfig, d
         let allowed = matches!(&item, Item::Mod(_) | Item::Use(_))
             || matches!(&item, Item::Fn(function) if function.attrs.iter().any(|attribute| {
                 attribute.path().segments.last().is_some_and(|segment| {
-                    matches!(segment.ident.to_string().as_str(), "proc_macro" | "proc_macro_attribute" | "proc_macro_derive")
+                    matches!(
+                        segment.ident.to_string().as_str(),
+                        "proc_macro" | "proc_macro_attribute" | "proc_macro_derive"
+                    )
                 })
             }));
         if !allowed {
@@ -1178,7 +1177,8 @@ fn check_type_layout(
             "STYLE010",
             relative,
             0,
-            "file contains multiple public top-level types; split them or add a reviewed .infra/style/exceptions.toml entry",
+            "file contains multiple public top-level types; split them or add a reviewed \
+             .infra/style/exceptions.toml entry",
         );
         return;
     }

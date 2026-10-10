@@ -11,6 +11,9 @@ mod cli;
 mod command;
 mod format;
 
+use std::fs;
+use std::process;
+
 use anyhow::Result;
 use clap::Parser;
 use qubit_infra_style::check_project;
@@ -38,19 +41,19 @@ fn main() {
                 println!("✅ Rust style operation completed successfully.");
             }
             if !success {
-                std::process::exit(1);
+                process::exit(1);
             }
         }
         Err(error) => {
             eprintln!("❌ Rust style operation failed: {error:#}");
-            std::process::exit(1);
+            process::exit(1);
         }
     }
 }
 
 /// Executes one CLI operation and returns whether it passed its checks.
 fn run(cli: Cli) -> Result<bool> {
-    let project = std::fs::canonicalize(&cli.project)?;
+    let project = fs::canonicalize(&cli.project)?;
     match cli.command {
         Command::Check => {
             let diagnostics = check_project(&project, cli.source_dir.as_deref(), cli.test_dir.as_deref())?;

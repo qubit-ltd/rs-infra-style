@@ -11,26 +11,32 @@ use std::process::Command;
 
 use tempfile::tempdir;
 
-const RUST_HEADER: &str = "// =============================================================================\n//    Copyright (c) 2025 - 2026 Haixing Hu.\n//\n//    SPDX-License-Identifier: Apache-2.0\n//\n//    Licensed under the Apache License, Version 2.0.\n// =============================================================================\n";
+const RUST_HEADER: &str = concat!(
+    "// =============================================================================\n",
+    "//    Copyright (c) 2025 - 2026 Haixing Hu.\n",
+    "//\n",
+    "//    SPDX-License-Identifier: Apache-2.0\n",
+    "//\n",
+    "//    Licensed under the Apache License, Version 2.0.\n",
+    "// =============================================================================\n",
+);
 
 /// Installs the project's rustfmt configuration for CLI fixtures.
 fn install_rustfmt(project: &Path, contents: &str) {
     let config = project.join(".infra/style/rustfmt.toml");
-    fs::create_dir_all(config.parent().expect("configuration directory"))
-        .expect("create configuration directory");
+    fs::create_dir_all(config.parent().expect("configuration directory")).expect("create configuration directory");
     fs::write(config, contents).expect("formatter configuration");
 }
 
 /// Installs shared toolchain defaults at the selected compatibility path.
 fn install_defaults(project: &Path, path: &str, contents: &str) {
     let config = project.join(path);
-    fs::create_dir_all(config.parent().expect("defaults directory"))
-        .expect("create defaults directory");
+    fs::create_dir_all(config.parent().expect("defaults directory")).expect("create defaults directory");
     fs::write(config, contents).expect("write defaults");
 }
 
 #[test]
-fn fix_cli_forwards_explicit_style_directories() {
+fn test_fix_cli_forwards_explicit_style_directories() {
     let directory = tempdir().expect("temporary project");
     fs::create_dir_all(directory.path().join("src")).expect("source directory");
     fs::create_dir_all(directory.path().join("custom-src")).expect("custom source directory");
@@ -109,14 +115,16 @@ fn test_formatter_uses_project_rustfmt_config() {
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     let output = String::from_utf8_lossy(&result.stdout);
     assert!(output.contains("--config-path"), "{output}");
-    assert!(output.contains(config.to_str().expect("configuration path")), "{output}");
+    assert!(
+        output.contains(config.to_str().expect("configuration path")),
+        "{output}"
+    );
 }
 
 #[test]
 fn test_formatter_rejects_missing_project_rustfmt_config() {
     let project = formatter_project();
-    fs::remove_file(project.path().join(".infra/style/rustfmt.toml"))
-        .expect("remove formatter configuration fixture");
+    fs::remove_file(project.path().join(".infra/style/rustfmt.toml")).expect("remove formatter configuration fixture");
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .arg("--project")
         .arg(project.path())
@@ -259,13 +267,12 @@ exit 0
     let output_path = project.path().join("arguments");
     let manifest_path = project.path().join("Cargo.toml");
     let fuzz_manifest = project.path().join("fuzz/Cargo.toml");
-    fs::create_dir_all(fuzz_manifest.parent().expect("fuzz directory"))
-        .expect("create fuzz directory");
+    fs::create_dir_all(fuzz_manifest.parent().expect("fuzz directory")).expect("create fuzz directory");
     fs::write(
         &fuzz_manifest,
         "[package]\nname = \"fuzz-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
     )
-        .expect("fuzz manifest");
+    .expect("fuzz manifest");
     let config = project.path().join(".infra/style/rustfmt.toml");
 
     for (override_toolchain, expected_toolchain) in [
@@ -289,11 +296,7 @@ exit 0
             command.env_remove("RS_INFRA_STYLE_TOOLCHAIN");
         }
         let result = command.output().expect("run formatter");
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
         let args = |manifest: &Path, include_all: bool| {
             let mut arguments = vec![expected_toolchain.to_owned(), "fmt".to_owned()];
             if include_all {
@@ -311,11 +314,7 @@ exit 0
         };
         assert_eq!(
             fs::read_to_string(&output_path).expect("recorded arguments"),
-            format!(
-                "{}{}",
-                args(&manifest_path, true),
-                args(&fuzz_manifest, false)
-            )
+            format!("{}{}", args(&manifest_path, true), args(&fuzz_manifest, false))
         );
     }
 }
@@ -323,8 +322,7 @@ exit 0
 #[test]
 fn test_formatter_rejects_legacy_defaults_after_migration() {
     let project = formatter_project();
-    fs::remove_file(project.path().join(".infra/tools/defaults.toml"))
-        .expect("remove new defaults fixture");
+    fs::remove_file(project.path().join(".infra/tools/defaults.toml")).expect("remove new defaults fixture");
     install_defaults(
         project.path(),
         ".infra/ci/defaults.toml",
@@ -386,11 +384,7 @@ fn test_formatter_toolchain_override_skips_malformed_defaults() {
         .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
         .output()
         .expect("run formatter dry run");
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     assert!(
         String::from_utf8_lossy(&result.stdout).contains("cargo +nightly-2026-07-01 fmt"),
         "{}",
@@ -420,8 +414,7 @@ fn test_formatter_requires_defaults_when_no_override_is_set() {
 #[test]
 fn test_formatter_override_works_without_defaults() {
     let project = formatter_project();
-    fs::remove_file(project.path().join(".infra/tools/defaults.toml"))
-        .expect("remove defaults fixture");
+    fs::remove_file(project.path().join(".infra/tools/defaults.toml")).expect("remove defaults fixture");
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .arg("--project")
         .arg(project.path())
@@ -430,11 +423,7 @@ fn test_formatter_override_works_without_defaults() {
         .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
         .output()
         .expect("run formatter dry run");
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     assert!(
         String::from_utf8_lossy(&result.stdout).contains("cargo +nightly-2026-07-01 fmt"),
         "{}",
@@ -458,7 +447,11 @@ fn test_formatter_dry_run_shows_contract_without_running_cargo() {
     assert_eq!(
         String::from_utf8(result.stdout).expect("command text"),
         format!(
-            "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml -- --config-path {}/.infra/style/rustfmt.toml\n✅ Rust style operation completed successfully.\n",
+            concat!(
+                "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml ",
+                "-- --config-path {}/.infra/style/rustfmt.toml\n",
+                "✅ Rust style operation completed successfully.\n",
+            ),
             project.path().display(),
             project.path().display()
         )
@@ -511,7 +504,7 @@ fn test_legacy_style_rules_are_reported() {
 }
 
 #[test]
-fn source_test_pair_rule_is_opt_in_like_legacy_rs_ci() {
+fn test_source_test_pair_rule_is_opt_in_like_legacy_rs_ci() {
     let project = tempdir().expect("temporary project");
     fs::write(
         project.path().join("Cargo.toml"),
