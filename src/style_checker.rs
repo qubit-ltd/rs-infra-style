@@ -46,6 +46,13 @@ struct CargoPackage {
     manifest_path: PathBuf,
 }
 
+/// Shared project settings used by the style checker.
+#[derive(Debug, Deserialize)]
+struct ProjectDefaults {
+    /// Nightly toolchain required for the project's rustfmt options.
+    nightly_toolchain: String,
+}
+
 /// Kind of Rust tree being inspected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RootKind {
@@ -204,7 +211,16 @@ pub fn fix(project: &Path, dry_run: bool) -> Result<()> {
 pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&Path>, dry_run: bool) -> Result<()> {
     if dry_run {
         let config = project_rustfmt_config(project)?;
-        println!("{}", cargo_fmt_description(&cargo_fmt_command(project, false, &config)));
+        let toolchain = project_toolchain(project)?;
+        println!(
+            "{}",
+            cargo_fmt_description(&cargo_fmt_command(
+                project,
+                false,
+                &config,
+                toolchain.as_deref()
+            ))
+        );
         return Ok(());
     }
     run_cargo_fmt(project, false)?;
@@ -476,10 +492,17 @@ fn check_internal_test_module(
 /// failure status.
 fn run_cargo_fmt(project: &Path, check_only: bool) -> Result<()> {
     let config = project_rustfmt_config(project)?;
-    run_formatter_command(cargo_fmt_command(project, check_only, &config), project)?;
+    let toolchain = project_toolchain(project)?;
+    run_formatter_command(
+        cargo_fmt_command(project, check_only, &config, toolchain.as_deref()),
+        project,
+    )?;
     let fuzz_manifest = project.join("fuzz/Cargo.toml");
     if fuzz_manifest.is_file() {
-        run_formatter_command(cargo_fuzz_fmt_command(&fuzz_manifest, check_only, &config), project)?;
+        run_formatter_command(
+            cargo_fuzz_fmt_command(&fuzz_manifest, check_only, &config, toolchain.as_deref()),
+            project,
+        )?;
     }
     Ok(())
 }
@@ -511,13 +534,57 @@ fn project_rustfmt_config(project: &Path) -> Result<PathBuf> {
         .with_context(|| format!("failed to resolve formatter configuration {}", path.display()))
 }
 
+/// Resolves the rustfmt toolchain from the environment or installed defaults.
+///
+/// The new shared path wins whenever it exists. The previous CI path is read
+/// only when the new path is absent, so a malformed new file cannot be hidden
+/// by stale compatibility data. Projects without either file retain Cargo's
+/// default toolchain for compatibility with older local fixtures.
+fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
+    let defaults_path = project.join(".infra/tools/defaults.toml");
+    let legacy_path = project.join(".infra/ci/defaults.toml");
+    let path = if defaults_path.exists() {
+        Some(defaults_path)
+    } else if legacy_path.exists() {
+        Some(legacy_path)
+    } else {
+        None
+    };
+    let configured = path
+        .map(|path| {
+            let contents = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            let defaults: ProjectDefaults = toml::from_str(&contents)
+                .with_context(|| format!("failed to parse {}", path.display()))?;
+            if defaults.nightly_toolchain.is_empty()
+                || defaults.nightly_toolchain.starts_with(['+', '-'])
+                || defaults.nightly_toolchain.chars().any(char::is_whitespace)
+            {
+                bail!(
+                    "nightly_toolchain in {} must be a nonempty toolchain name without whitespace",
+                    path.display()
+                );
+            }
+            Ok(defaults.nightly_toolchain)
+        })
+        .transpose()?;
+    Ok(std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN")
+        .filter(|value| !value.is_empty())
+        .or_else(|| configured.map(Into::into)))
+}
+
 /// Builds a formatter command using the project's installed configuration.
 ///
 /// `check_only` selects validation instead of rewriting. `config` is an
 /// absolute path obtained from the project before Cargo changes directory.
-fn cargo_fmt_command(project: &Path, check_only: bool, config: &Path) -> Command {
+fn cargo_fmt_command(
+    project: &Path,
+    check_only: bool,
+    config: &Path,
+    toolchain: Option<&std::ffi::OsStr>,
+) -> Command {
     let mut command = Command::new("cargo");
-    if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
+    if let Some(toolchain) = toolchain {
         let mut argument = std::ffi::OsString::from("+");
         argument.push(toolchain);
         command.arg(argument);
@@ -533,9 +600,14 @@ fn cargo_fmt_command(project: &Path, check_only: bool, config: &Path) -> Command
 }
 
 /// Builds the legacy second formatter invocation for a standalone fuzz crate.
-fn cargo_fuzz_fmt_command(manifest: &Path, check_only: bool, config: &Path) -> Command {
+fn cargo_fuzz_fmt_command(
+    manifest: &Path,
+    check_only: bool,
+    config: &Path,
+    toolchain: Option<&std::ffi::OsStr>,
+) -> Command {
     let mut command = Command::new("cargo");
-    if let Some(toolchain) = std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty()) {
+    if let Some(toolchain) = toolchain {
         let mut argument = std::ffi::OsString::from("+");
         argument.push(toolchain);
         command.arg(argument);
