@@ -361,6 +361,34 @@ fn test_formatter_rejects_malformed_new_defaults_without_legacy_fallback() {
 }
 
 #[test]
+fn test_formatter_toolchain_override_skips_malformed_defaults() {
+    let project = formatter_project();
+    install_defaults(
+        project.path(),
+        ".infra/tools/defaults.toml",
+        "nightly_toolchain = [not valid\n",
+    );
+    let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
+        .arg("--project")
+        .arg(project.path())
+        .args(["fix", "--dry-run"])
+        .env("RS_INFRA_STYLE_TOOLCHAIN", "nightly-2026-07-01")
+        .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
+        .output()
+        .expect("run formatter dry run");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stdout).contains("cargo +nightly-2026-07-01 fmt"),
+        "{}",
+        String::from_utf8_lossy(&result.stdout)
+    );
+}
+
+#[test]
 fn test_formatter_dry_run_shows_contract_without_running_cargo() {
     let project = formatter_project();
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))

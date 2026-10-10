@@ -541,6 +541,12 @@ fn project_rustfmt_config(project: &Path) -> Result<PathBuf> {
 /// by stale compatibility data. Projects without either file retain Cargo's
 /// default toolchain for compatibility with older local fixtures.
 fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
+    if let Some(toolchain) =
+        std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty())
+    {
+        return Ok(Some(toolchain));
+    }
+
     let defaults_path = project.join(".infra/tools/defaults.toml");
     let legacy_path = project.join(".infra/ci/defaults.toml");
     let path = if defaults_path.exists() {
@@ -568,9 +574,7 @@ fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
             Ok(defaults.nightly_toolchain)
         })
         .transpose()?;
-    Ok(std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN")
-        .filter(|value| !value.is_empty())
-        .or_else(|| configured.map(Into::into)))
+    Ok(configured.map(Into::into))
 }
 
 /// Builds a formatter command using the project's installed configuration.
