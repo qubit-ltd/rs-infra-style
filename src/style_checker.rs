@@ -538,8 +538,8 @@ fn project_rustfmt_config(project: &Path) -> Result<PathBuf> {
 ///
 /// The new shared path wins whenever it exists. The previous CI path is read
 /// only when the new path is absent, so a malformed new file cannot be hidden
-/// by stale compatibility data. Projects without either file retain Cargo's
-/// default toolchain for compatibility with older local fixtures.
+/// by stale compatibility data. A nonempty environment override bypasses both
+/// project files; otherwise at least one supported defaults file is required.
 fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
     if let Some(toolchain) =
         std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty())
@@ -554,7 +554,10 @@ fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
     } else if legacy_path.exists() {
         Some(legacy_path)
     } else {
-        None
+        bail!(
+            "missing {}; run ./update-infra.sh to install shared tool defaults",
+            defaults_path.display()
+        );
     };
     let configured = path
         .map(|path| {

@@ -43,6 +43,11 @@ fn fix_cli_forwards_explicit_style_directories() {
     fs::write(directory.path().join("src/lib.rs"), "pub fn value() -> i32 { 1 }\n").expect("crate root");
     fs::write(directory.path().join("custom-src/wrong.rs"), "use std::*;\n").expect("custom source");
     install_rustfmt(directory.path(), "edition = \"2024\"\n");
+    install_defaults(
+        directory.path(),
+        ".infra/tools/defaults.toml",
+        "nightly_toolchain = \"nightly-2026-06-05\"\n",
+    );
 
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .args([
@@ -82,6 +87,11 @@ fn formatter_project() -> tempfile::TempDir {
     )
     .expect("source");
     install_rustfmt(directory.path(), "tab_spaces = 2\n");
+    install_defaults(
+        directory.path(),
+        ".infra/tools/defaults.toml",
+        "nightly_toolchain = \"nightly-2026-06-05\"\n",
+    );
     directory
 }
 
@@ -194,9 +204,9 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
                 .env_remove("RS_INFRA_STYLE_TOOLCHAIN")
                 .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG");
             let mut expected = Vec::new();
+            expected.push("+nightly-2026-06-05");
             if toolchain {
                 command.env("RS_INFRA_STYLE_TOOLCHAIN", "nightly-2026-06-05");
-                expected.push("+nightly-2026-06-05");
             }
             expected.extend(["fmt", "--all", "--manifest-path"]);
             expected.push(manifest_path.to_str().expect("manifest path"));
@@ -313,6 +323,8 @@ exit 0
 #[test]
 fn test_formatter_defaults_fall_back_to_legacy_path_only_when_new_file_is_absent() {
     let project = formatter_project();
+    fs::remove_file(project.path().join(".infra/tools/defaults.toml"))
+        .expect("remove new defaults fixture");
     install_defaults(
         project.path(),
         ".infra/ci/defaults.toml",
@@ -389,6 +401,50 @@ fn test_formatter_toolchain_override_skips_malformed_defaults() {
 }
 
 #[test]
+fn test_formatter_requires_defaults_when_no_override_is_set() {
+    let project = formatter_project();
+    let defaults = project.path().join(".infra/tools/defaults.toml");
+    fs::remove_file(&defaults).expect("remove defaults fixture");
+    let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
+        .arg("--project")
+        .arg(project.path())
+        .args(["fix", "--dry-run"])
+        .env_remove("RS_INFRA_STYLE_TOOLCHAIN")
+        .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
+        .output()
+        .expect("run formatter dry run");
+    assert!(!result.status.success(), "missing defaults must fail");
+    let error = String::from_utf8_lossy(&result.stderr);
+    assert!(error.contains(".infra/tools/defaults.toml"), "{error}");
+    assert!(error.contains("update-infra.sh"), "{error}");
+}
+
+#[test]
+fn test_formatter_override_works_without_defaults() {
+    let project = formatter_project();
+    fs::remove_file(project.path().join(".infra/tools/defaults.toml"))
+        .expect("remove defaults fixture");
+    let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
+        .arg("--project")
+        .arg(project.path())
+        .args(["fix", "--dry-run"])
+        .env("RS_INFRA_STYLE_TOOLCHAIN", "nightly-2026-07-01")
+        .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
+        .output()
+        .expect("run formatter dry run");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stdout).contains("cargo +nightly-2026-07-01 fmt"),
+        "{}",
+        String::from_utf8_lossy(&result.stdout)
+    );
+}
+
+#[test]
 fn test_formatter_dry_run_shows_contract_without_running_cargo() {
     let project = formatter_project();
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
@@ -429,6 +485,11 @@ fn test_legacy_style_rules_are_reported() {
     .expect("inline test source");
     fs::write(project.path().join("tests/support/helpers.rs"), "fn helper() {}\n").expect("support test");
     install_rustfmt(project.path(), "edition = \"2024\"\n");
+    install_defaults(
+        project.path(),
+        ".infra/tools/defaults.toml",
+        "nightly_toolchain = \"nightly-2026-06-05\"\n",
+    );
 
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .args([
@@ -464,6 +525,11 @@ fn source_test_pair_rule_is_opt_in_like_legacy_rs_ci() {
     fs::write(project.path().join("src/lib.rs"), "pub mod widget;\n").expect("crate root");
     fs::write(project.path().join("src/widget.rs"), "pub struct Widget;\n").expect("source file");
     install_rustfmt(project.path(), "edition = \"2024\"\n");
+    install_defaults(
+        project.path(),
+        ".infra/tools/defaults.toml",
+        "nightly_toolchain = \"nightly-2026-06-05\"\n",
+    );
 
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .args(["--project", project.path().to_str().expect("project path"), "check"])
