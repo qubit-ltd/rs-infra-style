@@ -536,10 +536,9 @@ fn project_rustfmt_config(project: &Path) -> Result<PathBuf> {
 
 /// Resolves the rustfmt toolchain from the environment or installed defaults.
 ///
-/// The new shared path wins whenever it exists. The previous CI path is read
-/// only when the new path is absent, so a malformed new file cannot be hidden
-/// by stale compatibility data. A nonempty environment override bypasses both
-/// project files; otherwise at least one supported defaults file is required.
+/// A nonempty environment override bypasses the shared project defaults.
+/// Otherwise `.infra/tools/defaults.toml` is required; malformed or missing
+/// configuration is reported instead of silently selecting Cargo's default.
 fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
     if let Some(toolchain) =
         std::env::var_os("RS_INFRA_STYLE_TOOLCHAIN").filter(|value| !value.is_empty())
@@ -548,36 +547,26 @@ fn project_toolchain(project: &Path) -> Result<Option<std::ffi::OsString>> {
     }
 
     let defaults_path = project.join(".infra/tools/defaults.toml");
-    let legacy_path = project.join(".infra/ci/defaults.toml");
-    let path = if defaults_path.exists() {
-        Some(defaults_path)
-    } else if legacy_path.exists() {
-        Some(legacy_path)
-    } else {
+    if !defaults_path.exists() {
         bail!(
             "missing {}; run ./update-infra.sh to install shared tool defaults",
             defaults_path.display()
         );
-    };
-    let configured = path
-        .map(|path| {
-            let contents = fs::read_to_string(&path)
-                .with_context(|| format!("failed to read {}", path.display()))?;
-            let defaults: ProjectDefaults = toml::from_str(&contents)
-                .with_context(|| format!("failed to parse {}", path.display()))?;
-            if defaults.nightly_toolchain.is_empty()
-                || defaults.nightly_toolchain.starts_with(['+', '-'])
-                || defaults.nightly_toolchain.chars().any(char::is_whitespace)
-            {
-                bail!(
-                    "nightly_toolchain in {} must be a nonempty toolchain name without whitespace",
-                    path.display()
-                );
-            }
-            Ok(defaults.nightly_toolchain)
-        })
-        .transpose()?;
-    Ok(configured.map(Into::into))
+    }
+    let contents = fs::read_to_string(&defaults_path)
+        .with_context(|| format!("failed to read {}", defaults_path.display()))?;
+    let defaults: ProjectDefaults = toml::from_str(&contents)
+        .with_context(|| format!("failed to parse {}", defaults_path.display()))?;
+    if defaults.nightly_toolchain.is_empty()
+        || defaults.nightly_toolchain.starts_with(['+', '-'])
+        || defaults.nightly_toolchain.chars().any(char::is_whitespace)
+    {
+        bail!(
+            "nightly_toolchain in {} must be a nonempty toolchain name without whitespace",
+            defaults_path.display()
+        );
+    }
+    Ok(Some(defaults.nightly_toolchain.into()))
 }
 
 /// Builds a formatter command using the project's installed configuration.

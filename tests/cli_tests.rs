@@ -321,7 +321,7 @@ exit 0
 }
 
 #[test]
-fn test_formatter_defaults_fall_back_to_legacy_path_only_when_new_file_is_absent() {
+fn test_formatter_rejects_legacy_defaults_after_migration() {
     let project = formatter_project();
     fs::remove_file(project.path().join(".infra/tools/defaults.toml"))
         .expect("remove new defaults fixture");
@@ -338,12 +338,10 @@ fn test_formatter_defaults_fall_back_to_legacy_path_only_when_new_file_is_absent
         .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
         .output()
         .expect("run formatter dry run");
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
-    assert!(
-        String::from_utf8_lossy(&result.stdout).contains("cargo +nightly-2026-04-03 fmt"),
-        "{}",
-        String::from_utf8_lossy(&result.stdout)
-    );
+    assert!(!result.status.success(), "legacy defaults must not be used");
+    let error = String::from_utf8_lossy(&result.stderr);
+    assert!(error.contains(".infra/tools/defaults.toml"), "{error}");
+    assert!(error.contains("update-infra.sh"), "{error}");
 }
 
 #[test]
