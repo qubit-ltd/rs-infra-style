@@ -36,9 +36,9 @@ add the complete template and resolve it to `2025 - {current_year}` at that time
 nonconforming copyright or license header as a violation, not as a missing
 header. In correction mode, repair that block in place rather than prepend a
 second block. Preserve an accepted existing copyright line while repairing other
-lines. Do not invent a replacement year for a nonconforming copyright line
-unless a higher-priority task or repository rule supplies one; otherwise report
-it as unresolved.
+lines. Replace a nonconforming copyright line with the template copyright line,
+resolving `{current_year}` to the current four-digit calendar year. A
+higher-priority task or repository rule may specify a different year or range.
 
 Never leave either placeholder in a Rust source file. Preserve every line of an
 accepted complete existing header exactly. Make every added or repaired block

@@ -1,7 +1,9 @@
 # Bilingual README Structure Constants
 
 These templates are authoritative for Rust projects containing both
-`README.md` and `README.zh_CN.md`. Replace only brace-delimited placeholders.
+`README.md` and `README.zh_CN.md`. Resolve brace-delimited placeholders and
+project script entry points as described below; preserve the fixed identity and
+license text.
 
 ## Project Metadata
 
@@ -14,6 +16,11 @@ Resolve every placeholder from the project under review:
 | `{repository_name}` | Repository name parsed from `{repository_url}`. |
 | `{crate_name}` | Cargo package name from `Cargo.toml`. |
 | `{rust_version}` | Minimum supported Rust version, without a leading `v`, from authoritative project configuration. |
+
+The command examples below use the current rs-infra `.infra/bin/` entry points.
+For a project with explicitly different entry points, resolve commands from its
+actual configuration and keep both languages aligned; do not invent scripts.
+CI validates only the current crate, never downstream all-features combinations.
 
 Do not copy metadata from another project. Every CI, coverage, crates.io, and
 repository link must target the current project. Report unresolved or
@@ -51,8 +58,7 @@ Chinese `README.zh_CN.md`:
 
 The final four H2 sections must appear in the exact order below. No H2 section
 or substantive content may follow the author section. Preserve the fixed text,
-commands, copyright statement, and author identity; replace only
-`{repository_url}`.
+commands, copyright statement, and author identity; replace `{repository_url}` and resolve project script entry points as described above.
 
 English `README.md`:
 
@@ -67,10 +73,10 @@ cargo test
 cargo test --all-features
 
 # Project CI checks
-./ci-check.sh
+./.infra/bin/ci-check.sh
 
 # Check code coverage
-./coverage.sh
+./.infra/bin/coverage.sh
 ```
 
 ## License
@@ -83,8 +89,8 @@ full license text.
 ## Contributing
 
 Contributions are welcome. Please follow the Rust API guidelines, keep public
-API documentation and tests current, and run `./align-ci.sh` to format code and
-`./ci-check.sh` to satisfy CI requirements before submitting a pull request.
+API documentation and tests current, and run `./.infra/bin/align-ci.sh` to format code and
+`./.infra/bin/ci-check.sh` to satisfy CI requirements before submitting a pull request.
 
 ## Author
 
@@ -106,10 +112,10 @@ cargo test
 cargo test --all-features
 
 # 运行项目 CI 检查
-./ci-check.sh
+./.infra/bin/ci-check.sh
 
 # 检查代码覆盖率
-./coverage.sh
+./.infra/bin/coverage.sh
 ```
 
 ## 许可证
@@ -122,7 +128,7 @@ Copyright (c) 2025 - 2026. Haixing Hu. All rights reserved.
 ## 贡献
 
 欢迎贡献。请遵循 Rust API 指南，及时更新公共 API 文档与测试，并在提交
-Pull Request 前运行 `./align-ci.sh`格式化代码，运行`./ci-check.sh`对齐CI要求。
+Pull Request 前运行 `./.infra/bin/align-ci.sh` 格式化代码，运行 `./.infra/bin/ci-check.sh` 对齐 CI 要求。
 
 ## 作者
 
