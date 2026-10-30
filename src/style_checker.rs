@@ -576,7 +576,7 @@ fn cargo_fmt_command(project: &Path, check_only: bool, config: &Path, toolchain:
         argument.push(toolchain);
         command.arg(argument);
     }
-    command.args(["fmt", "--all", "--manifest-path"]);
+    command.args(["fmt", "--manifest-path"]);
     command.arg(project.join("Cargo.toml"));
     command.arg("--");
     if check_only {

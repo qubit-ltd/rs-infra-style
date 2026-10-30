@@ -216,7 +216,7 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
             if toolchain {
                 command.env("RS_INFRA_STYLE_TOOLCHAIN", "nightly-2026-06-05");
             }
-            expected.extend(["fmt", "--all", "--manifest-path"]);
+            expected.extend(["fmt", "--manifest-path"]);
             expected.push(manifest_path.to_str().expect("manifest path"));
             expected.push("--");
             if operation == "check" {
@@ -297,11 +297,8 @@ exit 0
         }
         let result = command.output().expect("run formatter");
         assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
-        let args = |manifest: &Path, include_all: bool| {
+        let args = |manifest: &Path| {
             let mut arguments = vec![expected_toolchain.to_owned(), "fmt".to_owned()];
-            if include_all {
-                arguments.push("--all".to_owned());
-            }
             arguments.extend([
                 "--manifest-path".to_owned(),
                 manifest.display().to_string(),
@@ -314,7 +311,7 @@ exit 0
         };
         assert_eq!(
             fs::read_to_string(&output_path).expect("recorded arguments"),
-            format!("{}{}", args(&manifest_path, true), args(&fuzz_manifest, false))
+            format!("{}{}", args(&manifest_path), args(&fuzz_manifest))
         );
     }
 }
@@ -448,7 +445,7 @@ fn test_formatter_dry_run_shows_contract_without_running_cargo() {
         String::from_utf8(result.stdout).expect("command text"),
         format!(
             concat!(
-                "cargo +nightly-2026-06-05 fmt --all --manifest-path {}/Cargo.toml ",
+                "cargo +nightly-2026-06-05 fmt --manifest-path {}/Cargo.toml ",
                 "-- --config-path {}/.infra/style/rustfmt.toml\n",
                 "✅ Rust style operation completed successfully.\n",
             ),
