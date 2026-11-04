@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![English Document](https://img.shields.io/badge/Document-English-blue.svg)](README.md)
 
-检查并安全修正 Qubit 项目当前第一阶段的固定 Rust 风格规则。
+检查 Qubit 项目的 Rust 格式和确定性源码风格规则。
 
 本工具随附的 Rust 风格权威标准位于
 [`doc/style-standard/`](doc/style-standard/)。该目录同步自
@@ -30,8 +30,13 @@ cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . chec
 cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . fix
 ```
 
-`check` 将 rustfmt 检查与固定项目风格规则合并执行；`fix` 执行 rustfmt
-后再验证固定规则。迁移生成的 `style-check.sh` 与 `align-ci.sh` 可以直接调用这两个稳定子命令。
+`check` 在同一门禁中执行 rustfmt 检查和 Analyzer 机械规则。`fix` 执行 rustfmt
+后运行同一门禁，不自动修复其他源码问题。项目的 `.infra/bin/style-check.sh` 和
+既有 CI style 任务自动使用该门禁；`align-ci.sh` 格式化后也运行相同校验。
+
+Git 项目默认包含 tracked 和非忽略 untracked Rust 文件，覆盖非默认 workspace
+成员、独立 fuzz crate 和 fixture。保留 `--source-dir` / `--test-dir` 显式选择及
+非 Git 项目的源码目录发现行为。检查不构建项目代码，也不调用 LLM。
 
 项目的 `.infra` 配置仍然是行为的唯一来源；工具仓库不会复制项目配置。具体策略由项目配置决定。
 
@@ -75,8 +80,14 @@ rs-infra-style --project . fix
 
 ## 能力与限制
 
-当前版本保留可机械化处理的旧 `rs-ci/style-check.sh` 规则和可选的
-`STYLE_ENFORCE_SOURCE_TEST_PAIRS` 兼容开关。由于 skill 允许确有 private
+新增 Analyzer 违规立即阻断 style 门禁；升级可能暴露旧格式检查曾接受的存量
+源码问题，需在消费项目中处理。独立分析入口和审查流程继续提供详细证据。
+
+与旧规则可机械等价的诊断保留原代码，可选的 `STYLE_ENFORCE_SOURCE_TEST_PAIRS`
+兼容开关继续支持。原 `STYLE009` 聚合文件业务 item 和 `STYLE012` internal
+测试模块关系启发式检查改为语义待审提示，不再阻断。`STYLE016` 继续检查纯
+`mod.rs` 聚合文件中可确定的私有 import；条件配置存在歧义时保留待审提示。`explicit-imports` 例外仅
+豁免适用的 import 策略检查，不豁免项目 rustfmt 格式要求。由于 skill 允许确有 private
 访问需求的 inline test，工具不会自动禁止所有 inline test。项目例外放在
 `.infra/style/exceptions.toml`；coverage 例外还必须有源码中的
 `qubit-style: allow coverage-cfg` 注释。Clippy、coverage 和 Cargo.lock 更新等
@@ -88,7 +99,8 @@ rs-infra-style --project . fix
 
 ## 确定性分析
 
-`analyze` 是独立于 `check` 和 `fix` 的只读源码分析入口。输入为包含仓库相对
+`analyze` 暴露 `check` 和 `fix` 共用的只读机械引擎，并提供更完整的覆盖报告。
+输入为包含仓库相对
 Rust 路径的 JSON 数组，精确清单可覆盖非默认 workspace 成员、自定义 Cargo
 目标和独立 fuzz crate。关联源码和配置仅作为上下文读取，不执行 Cargo metadata、
 依赖解析、构建或宏展开。
@@ -102,11 +114,13 @@ rs-infra-style analyze --project . --files-from /tmp/rust-source-list.json \
 带版本的 JSON 报告区分证据充分的 `error` 诊断与信息级审查提示。每个输入文件
 均包含规范及机械子检查覆盖：`pass`、`fail`、`needs_semantic_review`、
 `not_applicable`、`blocked`。机械扫描无问题后，文档语义、领域边界、测试位置、
-方法顺序和依赖上下文的属性仍须语义审查。既有 `Diagnostic`、`check`、`fix`
-接口保持原有约定。
+方法顺序和依赖上下文的属性仍须语义审查。`check --format json` 保留既有
+`Diagnostic` 数组结构，检查未完成时也输出该结构；数组仅包含阻断诊断。
+`analyze` 保留包含信息提示和覆盖明细的版本化报告。
 
-退出码 `0` 表示扫描完成且未发现确定违规，`1` 表示发现确定违规，`2` 表示分析
-未完整完成。工具缺失、输入文件不可读或无法解析、配置无效及规范版本不匹配均
+三个命令的退出码 `0` 均表示机械检查完成且未发现确定违规，`1` 表示发现确定
+违规（含格式问题），`2` 表示分析未完整完成或工具执行失败。同次运行发现违规
+但检查不完整时优先返回 `2`。语义待审提示不阻断；成功不代表语义合规。工具缺失、输入文件不可读或无法解析、配置无效及规范版本不匹配均
 不会被当作通过。item 宏及条件声明保留明确的待审覆盖。惯例中的测试 support
 目录须有明确例外或语义确认，不能仅按目录名自动判定豁免。
 

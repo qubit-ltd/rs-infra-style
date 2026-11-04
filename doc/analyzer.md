@@ -25,6 +25,27 @@ style 配置及工具链 defaults 纳入输入摘要。调度器应额外绑定�
 blocked 时优先返回 2，同时保留已发现诊断。输入协议本身无效时输出 stderr，
 返回 2，不伪造有效 JSON。调用方必须校验 JSON 协议和退出码一致性。
 
+## 统一机械门禁
+
+`.infra/bin/style-check.sh` 调用的 `check` 先执行项目 rustfmt 检查，再运行本协议
+的同一机械引擎；既有 CI style 任务因此自动包含 Analyzer。默认发现 Git tracked
+和非忽略 untracked Rust 文件，包括非默认 workspace 成员、独立 fuzz crate 和
+fixture；显式 source/test 目录选择及非 Git 项目发现行为继续支持。
+
+`check` 只读；`fix` 和 alignment 仅通过 rustfmt 格式化，再执行同一机械校验。
+其他机械问题只报告，不自动修改源码，也不调用 agent。检查结果使用既有
+`Diagnostic` 数组投影确定错误，保留兼容规则代码；本协议的 `analyze` 报告结构
+不变，继续提供稳定 `check_id`、信息提示和覆盖情况。原 `STYLE009` 聚合文件
+业务 item 与 `STYLE012` internal 测试模块关系检查需要语义判断，改为待审提示，
+不作为确定错误。`STYLE016` 继续检查纯 `mod.rs` 聚合文件中可确定的私有
+import；条件配置存在歧义时为待审提示。`explicit-imports` 例外保留适用的 import 策略豁免，项目 rustfmt
+格式检查仍必需。
+
+三个入口都只在机械检查完整且无确定违规时返回 0；确定违规返回 1，检查不完整
+或工具执行失败优先返回 2。信息级语义提示不阻断，成功不代表完整语义审查通过。
+`check --format json` 在格式失败或分析不完整时仍输出诊断数组，工具日志写入
+stderr。新机械规则直接成为门禁，升级时发现的存量问题不会自动豁免。
+
 ## 子检查登记表
 
 | 规范 | 稳定子检查 | 边界 |

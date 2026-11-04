@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![中文文档](https://img.shields.io/badge/文档-中文版-blue.svg)](README.zh_CN.md)
 
-Check and safely correct the first-generation fixed Rust style rules used by Qubit projects.
+Check Rust formatting and deterministic style rules used by Qubit projects.
 
 The authoritative Rust style standard shipped with this tool is in
 [`doc/style-standard/`](doc/style-standard/). It is synchronized from the
@@ -32,9 +32,15 @@ cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . chec
 cargo run --manifest-path /path/to/rs-infra-style/Cargo.toml -- --project . fix
 ```
 
-`check` combines rustfmt check with the fixed project style rules. `fix` runs
-rustfmt and then validates the fixed rules. Migration-generated `style-check.sh`
-and `align-ci.sh` wrappers can call these two stable subcommands directly.
+`check` runs rustfmt checks and the Analyzer mechanical rules through one gate.
+`fix` runs rustfmt and then the same gate; it does not repair other source issues.
+The project’s `.infra/bin/style-check.sh` and the existing CI style task use this
+gate automatically. `align-ci.sh` uses the same validation after formatting.
+
+By default, Git projects include tracked and nonignored untracked Rust files,
+including non-default workspace members, standalone fuzz crates, and fixtures.
+Explicit `--source-dir` / `--test-dir` selections and non-Git source-directory
+discovery remain supported. The check does not build project code or invoke an LLM.
 
 The project's `.infra` configuration remains the source of truth; this tool does not copy project configuration into the tool repository.
 
@@ -86,8 +92,19 @@ Cargo.
 
 ## Capabilities and limitations
 
-This release preserves the mechanical legacy rules and the opt-in
-`STYLE_ENFORCE_SOURCE_TEST_PAIRS` compatibility switch. Inline test placement
+New Analyzer violations block the style gate immediately; upgrading can expose
+existing source issues that the previous formatter-based check accepted.
+Resolve reported issues in the consuming project. The standalone analyzer and
+review workflow remain available for detailed evidence.
+
+Mechanically equivalent legacy findings retain their diagnostic codes, and the
+opt-in `STYLE_ENFORCE_SOURCE_TEST_PAIRS` switch remains supported. Former
+`STYLE009` aggregation-business-item and `STYLE012` internal-test-module
+relationship heuristics are semantic review signals rather than blocking rules.
+`STYLE016` remains for definite private imports in a pure `mod.rs` aggregator;
+conditional ambiguity remains a review signal.
+An `explicit-imports` exception suppresses the applicable import policy checks;
+it does not exempt files from project rustfmt formatting. Inline test placement
 is not rejected automatically because the skill allows inline tests when
 private access is necessary. Project-specific exceptions belong in
 `.infra/style/exceptions.toml`; coverage exceptions additionally require a
@@ -101,8 +118,8 @@ See the command help and source tests for the supported interface. Switch to [�
 
 ## Deterministic analysis
 
-`analyze` is a read-only source analysis entry point independent of `check` and
-`fix`. Supply a JSON array of project-relative Rust file paths; this exact list
+`analyze` exposes the same read-only mechanical engine used by `check` and
+`fix`, with a richer coverage report. Supply a JSON array of project-relative Rust file paths; this exact list
 can include non-default workspace members, custom Cargo targets, and standalone
 fuzz crates. Associated sources and configuration are read as context, without
 Cargo metadata, dependency resolution, builds, or macro expansion.
@@ -118,10 +135,15 @@ review signals. Every requested file has normative and machine-subcheck coverage
 `pass`, `fail`, `needs_semantic_review`, `not_applicable`, or `blocked`. A clean
 mechanical scan still requires semantic review of documentation meaning, domain
 boundaries, test placement, method ordering, and context-dependent attributes.
-The existing `Diagnostic`, `check`, and `fix` interfaces retain their contract.
+`check --format json` retains its existing `Diagnostic` array shape, including
+on incomplete checks. It emits blocking findings only; `analyze` retains the
+versioned report with informational signals and coverage details.
 
-Exit status is `0` for a completed scan without proved violations, `1` for proved
-violations, and `2` for incomplete analysis. Missing tooling, unreadable or
+For all three commands, exit status is `0` for completed mechanical checks
+without proved violations, `1` for proved violations (including formatting),
+and `2` for incomplete analysis or tool failures. Incomplete checks take priority
+over violations found in the same run. Informational semantic-review signals do
+not fail the gate; success does not certify semantic compliance. Missing tooling, unreadable or
 unparseable requested files, invalid configuration, and unsupported standard
 snapshots never silently pass. Item macros and conditional declarations retain
 explicit review coverage. Conventional test-support directories require an
