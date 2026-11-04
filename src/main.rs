@@ -27,6 +27,48 @@ use crate::format::Format;
 /// Parses arguments and executes the requested style operation.
 fn main() {
     let cli = Cli::parse();
+    if let Command::Analyze {
+        files_from,
+        standards,
+        repository_readme,
+    } = &cli.command
+    {
+        let result = (|| -> Result<i32> {
+            let files: Vec<String> = serde_json::from_slice(&fs::read(files_from)?)?;
+            let mut report = qubit_infra_style::analysis::analyze(&cli.project, &files, standards.as_deref())?;
+            if *repository_readme {
+                qubit_infra_style::analysis::analyze_repository_readme(&cli.project, &mut report)?;
+            }
+            if cli.format == Format::Json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                for finding in report.diagnostics.iter().chain(&report.repository_diagnostics) {
+                    println!(
+                        "{}: {}:{}:{} [{} / {}] {}",
+                        finding.severity,
+                        finding.path,
+                        finding.line,
+                        finding.column,
+                        finding.rule_id,
+                        finding.check_id,
+                        finding.message
+                    );
+                }
+                for blocked in &report.blocked {
+                    eprintln!("blocked: {}: {}", blocked.path, blocked.reason);
+                }
+                println!("Mechanical analysis only; semantic review remains required.");
+            }
+            Ok(report.exit_code())
+        })();
+        match result {
+            Ok(code) => process::exit(code),
+            Err(error) => {
+                eprintln!("analysis failed: {error:#}");
+                process::exit(2);
+            }
+        }
+    }
     let json = cli.format == Format::Json;
     let is_check = matches!(&cli.command, Command::Check);
     match run(cli) {
@@ -55,6 +97,7 @@ fn main() {
 fn run(cli: Cli) -> Result<bool> {
     let project = fs::canonicalize(&cli.project)?;
     match cli.command {
+        Command::Analyze { .. } => unreachable!("analysis is handled separately"),
         Command::Check => {
             let diagnostics = check_project(&project, cli.source_dir.as_deref(), cli.test_dir.as_deref())?;
             print_diagnostics(&diagnostics, cli.format == Format::Json)?;

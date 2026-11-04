@@ -7,6 +7,10 @@
 // =============================================================================
 //! Fixed first-phase Rust style checks used by Qubit Rust projects.
 
+pub mod analysis;
+mod analysis_project;
+mod analysis_readme;
+mod analysis_rules;
 mod diagnostic;
 mod style_checker;
 mod style_exceptions;

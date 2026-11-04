@@ -14,6 +14,19 @@ use clap::Subcommand;
 pub(crate) enum Command {
     /// Check formatting and style rules.
     Check,
+    /// Analyze an exact source list without formatting or building.
+    Analyze {
+        /// JSON array of project-relative Rust source paths.
+        #[arg(long)]
+        files_from: std::path::PathBuf,
+        /// Immutable standard snapshot to validate against the compiled
+        /// authority.
+        #[arg(long, alias = "rules-directory")]
+        standards: Option<std::path::PathBuf>,
+        /// Also check repository README structure in separate report fields.
+        #[arg(long)]
+        repository_readme: bool,
+    },
     /// Format the project and validate style rules.
     Fix {
         /// Print the formatting command without changing files.

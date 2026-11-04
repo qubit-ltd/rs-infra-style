@@ -19,7 +19,7 @@ use crate::format::Format;
 #[command(name = "rs-infra-style")]
 pub(crate) struct Cli {
     /// Project root to inspect.
-    #[arg(long, default_value = ".")]
+    #[arg(long, global = true, default_value = ".")]
     pub(crate) project: PathBuf,
     /// Source directory relative to the project root.
     #[arg(long)]
@@ -28,7 +28,7 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) test_dir: Option<PathBuf>,
     /// Diagnostic output format.
-    #[arg(long, value_enum, default_value_t = Format::Text)]
+    #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
     pub(crate) format: Format,
     /// Requested style operation.
     #[command(subcommand)]

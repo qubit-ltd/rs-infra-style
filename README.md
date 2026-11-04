@@ -99,6 +99,63 @@ Clippy, coverage, and Cargo.lock updates remains the responsibility of
 
 See the command help and source tests for the supported interface. Switch to [中文文档](README.zh_CN.md).
 
+## Deterministic analysis
+
+`analyze` is a read-only source analysis entry point independent of `check` and
+`fix`. Supply a JSON array of project-relative Rust file paths; this exact list
+can include non-default workspace members, custom Cargo targets, and standalone
+fuzz crates. Associated sources and configuration are read as context, without
+Cargo metadata, dependency resolution, builds, or macro expansion.
+
+```sh
+printf '["src/lib.rs", "tests/api_tests.rs"]' > /tmp/rust-source-list.json
+rs-infra-style analyze --project . --files-from /tmp/rust-source-list.json \
+  --standards /path/to/style-standard --format json
+```
+
+The versioned JSON report separates proved `error` diagnostics from informational
+review signals. Every requested file has normative and machine-subcheck coverage:
+`pass`, `fail`, `needs_semantic_review`, `not_applicable`, or `blocked`. A clean
+mechanical scan still requires semantic review of documentation meaning, domain
+boundaries, test placement, method ordering, and context-dependent attributes.
+The existing `Diagnostic`, `check`, and `fix` interfaces retain their contract.
+
+Exit status is `0` for a completed scan without proved violations, `1` for proved
+violations, and `2` for incomplete analysis. Missing tooling, unreadable or
+unparseable requested files, invalid configuration, and unsupported standard
+snapshots never silently pass. Item macros and conditional declarations retain
+explicit review coverage. Conventional test-support directories require an
+explicit exception or semantic confirmation rather than an assumed exemption.
+
+The report binds the analyzer version, all read source/configuration bytes, and
+standard authority to SHA-256 digests. `--standards` must match the seven-document
+snapshot embedded in this binary; a newer authority requires a matching analyzer
+release. Project rustfmt is invoked through its configured installed toolchain,
+using stdin and `skip_children=true`; it never rewrites source. Import order is
+compared against rustfmt rather than simulated with a string sort. Detailed
+coverage and limitations are documented in [the analyzer contract](doc/analyzer.md).
+
+
+
+A higher-priority project copyright policy can be recorded in
+`.infra/style/analysis.toml`; overrides require an explicit reason:
+
+```toml
+format = 1
+
+[header]
+owner = "Example Team"
+minimum_year = 2020
+reason = "This project uses its established copyright identity."
+```
+
+The exact seven-line template remains required. Accepted single years and ranges
+beginning at `minimum_year` are preserved. Invalid or unexplained overrides block
+analysis. Use `--repository-readme` to opt into separate repository README
+structure findings; source-only scans continue to mark README-001 as outside
+file scope. This option binds README presence and metadata to the input digest;
+it does not replace bilingual semantic review.
+
 ## Testing
 
 ```bash

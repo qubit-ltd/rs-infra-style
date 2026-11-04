@@ -86,6 +86,55 @@ rs-infra-style --project . fix
 
 可通过命令帮助和源码测试了解实际接口。切换到 [English README](README.md)。
 
+## 确定性分析
+
+`analyze` 是独立于 `check` 和 `fix` 的只读源码分析入口。输入为包含仓库相对
+Rust 路径的 JSON 数组，精确清单可覆盖非默认 workspace 成员、自定义 Cargo
+目标和独立 fuzz crate。关联源码和配置仅作为上下文读取，不执行 Cargo metadata、
+依赖解析、构建或宏展开。
+
+```sh
+printf '["src/lib.rs", "tests/api_tests.rs"]' > /tmp/rust-source-list.json
+rs-infra-style analyze --project . --files-from /tmp/rust-source-list.json \
+  --standards /path/to/style-standard --format json
+```
+
+带版本的 JSON 报告区分证据充分的 `error` 诊断与信息级审查提示。每个输入文件
+均包含规范及机械子检查覆盖：`pass`、`fail`、`needs_semantic_review`、
+`not_applicable`、`blocked`。机械扫描无问题后，文档语义、领域边界、测试位置、
+方法顺序和依赖上下文的属性仍须语义审查。既有 `Diagnostic`、`check`、`fix`
+接口保持原有约定。
+
+退出码 `0` 表示扫描完成且未发现确定违规，`1` 表示发现确定违规，`2` 表示分析
+未完整完成。工具缺失、输入文件不可读或无法解析、配置无效及规范版本不匹配均
+不会被当作通过。item 宏及条件声明保留明确的待审覆盖。惯例中的测试 support
+目录须有明确例外或语义确认，不能仅按目录名自动判定豁免。
+
+报告通过 SHA-256 摘要绑定分析器版本、实际读取的源码和配置及规范版本。
+`--standards` 必须与二进制内嵌的七份规范文档一致；规范升级后须使用匹配的
+分析器版本。程序通过项目配置的已安装工具链运行 rustfmt，使用 stdin 和
+`skip_children=true`，不会写回源码；import 排序以 rustfmt 为准，不使用字符串
+排序模拟。详细覆盖与边界见[分析器协议](doc/analyzer.md)。
+
+
+
+项目优先级更高的版权规则可写入 `.infra/style/analysis.toml`，必须记录明确理由：
+
+```toml
+format = 1
+
+[header]
+owner = "Example Team"
+minimum_year = 2020
+reason = "本项目沿用既有的版权身份。"
+```
+
+七行模板的其他行保持精确匹配。已接受的单年份或以 `minimum_year` 开始的年份
+范围均予保留；无效或缺少理由的覆盖配置会阻止分析。通过
+`--repository-readme` 可显式增加独立的仓库 README 结构诊断；只检查源码时，
+README-001 仍标为文件范围外。该选项将 README 的存在状态及项目元数据纳入
+输入摘要，但不替代双语语义一致性审查。
+
 ## 测试
 
 ```bash
