@@ -341,6 +341,9 @@ impl Inspector<'_> {
     ///
     /// * `items` - Items whose consecutive imports share one module scope.
     fn imports(&mut self, items: &[Item]) {
+        if self.exceptions.allows("explicit-imports", self.path) {
+            return;
+        }
         let uses: Vec<_> = items
             .iter()
             .filter_map(|item| if let Item::Use(x) = item { Some(x) } else { None })

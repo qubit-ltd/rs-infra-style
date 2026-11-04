@@ -360,7 +360,7 @@ pub(crate) fn source_role(project: &Path, path: &str) -> (bool, bool) {
 ///
 /// Arguments provide the source, project context or analysis state described by
 /// this operation.
-fn package_edition(project: &Path, path: &str) -> Option<String> {
+pub(crate) fn package_edition(project: &Path, path: &str) -> Option<String> {
     let root = package_root(project, path);
     let manifest = safe_text(project, root.join("Cargo.toml"))
         .ok()
@@ -502,7 +502,9 @@ pub(crate) fn inspect(
     parsed: &BTreeMap<String, syn::File>,
     roles: &BTreeMap<String, (bool, bool)>,
     report: &mut AnalysisReport,
+    policy: (&crate::style_exceptions::ExceptionConfig, bool),
 ) {
+    let (exceptions, check_formatting) = policy;
     let mut declarations = Vec::new();
     let mut graph = BTreeMap::new();
     for (path, ast) in parsed {
@@ -746,7 +748,15 @@ pub(crate) fn inspect(
                 report.diagnostics.push(finding(path,"TEST-002","test-reachability",1,"Test source is not reachable through the statically resolved Cargo/module graph",format!("No statically resolved target/mod path reaches {path}; conditional or macro module declarations require review"),"info"));
             }
         }
-        check_formatter(project, path, source, ast, report);
+        check_formatter(
+            project,
+            path,
+            source,
+            ast,
+            report,
+            exceptions.allows("explicit-imports", path),
+            check_formatting,
+        );
     }
 }
 
@@ -757,7 +767,15 @@ pub(crate) fn inspect(
 ///
 /// Arguments provide the source, project context or analysis state described by
 /// this operation.
-fn check_formatter(project: &Path, path: &str, source: &str, ast: &syn::File, report: &mut AnalysisReport) {
+fn check_formatter(
+    project: &Path,
+    path: &str,
+    source: &str,
+    ast: &syn::File,
+    report: &mut AnalysisReport,
+    imports_exempt: bool,
+    check_formatting: bool,
+) {
     let config = project.join(".infra/style/rustfmt.toml");
     if let Err(error) = crate::analysis::read_safe(project, ".infra/style/rustfmt.toml") {
         report.blocked.push(AnalysisIssue {
@@ -838,6 +856,27 @@ fn check_formatter(project: &Path, path: &str, source: &str, ast: &syn::File, re
     match output {
         Ok(output) if output.status.success() => {
             let formatted = String::from_utf8_lossy(&output.stdout);
+            if check_formatting && formatted != source {
+                report.diagnostics.push(finding(
+                    path,
+                    "IMPORT-001",
+                    "rustfmt-format",
+                    1,
+                    "Source formatting differs from the project's configured rustfmt output",
+                    "Read-only full-file rustfmt comparison, without following child modules".into(),
+                    "error",
+                ));
+            }
+            if imports_exempt {
+                report.coverage.push(Coverage {
+                    path: path.into(),
+                    rule_id: "IMPORT-001".into(),
+                    check_id: "rustfmt-import-order".into(),
+                    status: "not_applicable".into(),
+                    evidence: "Exact-path explicit-imports exception; formatter execution still verified".into(),
+                });
+                return;
+            }
             let original_imports = Some(imports_from_ast(ast));
             let formatted_imports = import_sequence(&formatted);
             if let (Some(before), Some(after)) = (original_imports, formatted_imports) {

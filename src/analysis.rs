@@ -155,8 +155,12 @@ fn standard_digest(directory: &Path) -> Result<String> {
 /// Arguments provide the source, project context or analysis state described by
 /// this operation.
 pub(crate) fn excluded(path: &str) -> bool {
-    path.split('/')
-        .any(|part| matches!(part, "vendor" | "vendored" | "generated" | "target" | ".git"))
+    path.split('/').any(|part| {
+        matches!(
+            part,
+            "vendor" | "vendored" | "generated" | "target" | ".git" | ".worktrees"
+        )
+    })
 }
 
 /// Rejects source paths that could escape the project or violate the list
@@ -236,6 +240,28 @@ pub(crate) fn read_safe(project: &Path, relative: &str) -> Result<Vec<u8>> {
 /// Source/parse/tool/standard failures are represented in the report as
 /// blocked.
 pub fn analyze(project: &Path, files: &[String], standards: Option<&Path>) -> Result<AnalysisReport> {
+    analyze_scoped(project, files, standards, None, None, false)
+}
+
+/// Analyzes the same rules with explicit compatibility source and test roots.
+///
+/// # Parameters
+///
+/// * `project` - Repository root used for sources and context.
+/// * `files` - Exact requested source file list.
+/// * `standards` - Optional immutable standard snapshot.
+/// * `source_dir` - Optional explicit production root.
+/// * `test_dir` - Optional explicit test root.
+/// * `check_formatting` - Compares full-file formatting for the mechanical
+///   gate.
+pub(crate) fn analyze_scoped(
+    project: &Path,
+    files: &[String],
+    standards: Option<&Path>,
+    source_dir: Option<&Path>,
+    test_dir: Option<&Path>,
+    check_formatting: bool,
+) -> Result<AnalysisReport> {
     if fs::symlink_metadata(project)?.file_type().is_symlink() {
         bail!("symbolic-link project root is not supported");
     }
@@ -313,6 +339,11 @@ pub fn analyze(project: &Path, files: &[String], standards: Option<&Path>) -> Re
             for entry in output.stdout.split(|byte| *byte == 0).filter(|entry| !entry.is_empty()) {
                 match std::str::from_utf8(entry) {
                     Ok(path) => {
+                        if fs::symlink_metadata(project.join(path))
+                            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                        {
+                            continue;
+                        }
                         context_paths.insert(path.to_owned());
                     }
                     Err(error) => report.blocked.push(AnalysisIssue {
@@ -478,7 +509,18 @@ pub fn analyze(project: &Path, files: &[String], standards: Option<&Path>) -> Re
             }),
         }
     }
-    let roles = analysis_project::source_roles(&project, &sources, &parsed);
+    let mut roles = analysis_project::source_roles(&project, &sources, &parsed);
+    if source_dir.is_some() || test_dir.is_some() {
+        let source = source_dir.unwrap_or(Path::new("src"));
+        let tests = test_dir.unwrap_or(Path::new("tests"));
+        for path in sources.keys() {
+            let path_ref = Path::new(path);
+            if path_ref.starts_with(source) || path_ref.starts_with(tests) {
+                let test = path_ref.starts_with(tests) || path_ref.starts_with(source.join("tests"));
+                roles.insert(path.clone(), (!test && path_ref.starts_with(source), test));
+            }
+        }
+    }
     if report.standards_digest == report.supported_standards_digest
         && !report.blocked.iter().any(|issue| issue.path.is_empty())
     {
@@ -496,7 +538,24 @@ pub fn analyze(project: &Path, files: &[String], standards: Option<&Path>) -> Re
                 ));
             }
         }
-        analysis_project::inspect(&project, &requested, &sources, &parsed, &roles, &mut report);
+        analysis_project::inspect(
+            &project,
+            &requested,
+            &sources,
+            &parsed,
+            &roles,
+            &mut report,
+            (&exceptions, check_formatting),
+        );
+        crate::analysis_pairs::inspect(
+            &project,
+            &requested,
+            &parsed,
+            &roles,
+            (source_dir, test_dir),
+            &exceptions,
+            &mut report,
+        );
     }
     for path in &requested {
         record_coverage(
@@ -522,6 +581,10 @@ pub fn analyze(project: &Path, files: &[String], standards: Option<&Path>) -> Re
         &report.files,
         &report.context_files,
         std::env::var("RS_INFRA_STYLE_TOOLCHAIN").ok(),
+        std::env::var("STYLE_ENFORCE_SOURCE_TEST_PAIRS").ok(),
+        source_dir,
+        test_dir,
+        check_formatting,
     ))?);
     Ok(report)
 }

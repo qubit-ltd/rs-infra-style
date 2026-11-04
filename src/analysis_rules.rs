@@ -102,12 +102,13 @@ pub(crate) fn inspect_with_context(
         conditional: has_cfg(&ast.attrs),
     };
     if test_tree && !exceptions.allows("test-file-name", path) {
+        let concrete_tests = concrete_test_items(&ast.items);
         let name = Path::new(path).file_name().and_then(|x| x.to_str()).unwrap_or("");
         if !matches!(name, "mod.rs" | "main.rs") && !name.ends_with("_tests.rs") {
             inspector.issue(
                 "TEST-003",
                 "test-file-name",
-                if support { "review" } else { "error" },
+                if support || !concrete_tests { "review" } else { "error" },
                 Span::call_site(),
                 name,
                 (
@@ -115,6 +116,33 @@ pub(crate) fn inspect_with_context(
                     "Rename the test module and update its module declarations.",
                 ),
             );
+        }
+    }
+    if production
+        && !test_tree
+        && Path::new(path).file_name().is_some_and(|name| name == "mod.rs")
+        && !exceptions.allows("explicit-imports", path)
+        && ast
+            .items
+            .iter()
+            .all(|item| matches!(item, syn::Item::Mod(_) | syn::Item::Use(_) | syn::Item::ExternCrate(_)))
+    {
+        for item in &ast.items {
+            if let syn::Item::Use(import) = item
+                && matches!(import.vis, syn::Visibility::Inherited)
+            {
+                inspector.issue(
+                    "IMPORT-001",
+                    "aggregation-private-imports",
+                    if has_cfg(&import.attrs) { "review" } else { "error" },
+                    import.use_token.span,
+                    &import.to_token_stream().to_string(),
+                    (
+                        "Pure mod.rs aggregation files must re-export imports with explicit visibility.",
+                        "Use a visible re-export or record a reasoned explicit-imports exception.",
+                    ),
+                );
+            }
         }
     }
     inspector.check_layout(&ast.items, true);
@@ -149,6 +177,23 @@ pub(crate) fn inspect_with_context(
     }
     inspector.findings
 }
+/// Identifies concrete test entry points without mistaking helper functions for
+/// tests.
+///
+/// # Parameters
+///
+/// * `items` - Parsed declarations, including nested inline modules.
+fn concrete_test_items(items: &[syn::Item]) -> bool {
+    items.iter().any(|item| match item {
+        syn::Item::Fn(function) => is_test_function(&function.attrs),
+        syn::Item::Mod(module) => module
+            .content
+            .as_ref()
+            .is_some_and(|(_, items)| concrete_test_items(items)),
+        _ => false,
+    })
+}
+
 /// Detects a brace list or wildcard anywhere within one use tree.
 ///
 /// # Parameters

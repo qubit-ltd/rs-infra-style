@@ -16,6 +16,8 @@ use std::process;
 
 use anyhow::Result;
 use clap::Parser;
+use qubit_infra_style::CheckFailure;
+use qubit_infra_style::Diagnostic;
 use qubit_infra_style::check_project;
 use qubit_infra_style::fix_project;
 use qubit_infra_style::print_diagnostics;
@@ -76,7 +78,7 @@ fn main() {
             if json {
                 let icon = if success { "✅" } else { "❌" };
                 eprintln!(
-                    "{icon} Rust style checks {}.",
+                    "{icon} Rust mechanical style checks {}; semantic review remains separate.",
                     if success { "passed" } else { "failed" }
                 );
             } else if success && !is_check {
@@ -88,12 +90,48 @@ fn main() {
         }
         Err(error) => {
             eprintln!("❌ Rust style operation failed: {error:#}");
-            process::exit(1);
+            let exit_code = if let Some(failure) = error.downcast_ref::<CheckFailure>() {
+                if json && let Err(output_error) = print_diagnostics(failure.diagnostics(), true) {
+                    eprintln!("failed to serialize style diagnostics: {output_error:#}");
+                    process::exit(2);
+                }
+                failure.exit_code()
+            } else {
+                if json {
+                    let diagnostics = [Diagnostic {
+                        schema_version: 1,
+                        code: "CHECK-ERROR".into(),
+                        severity: "error".into(),
+                        path: String::new(),
+                        line: 0,
+                        message: format!("{error:#}"),
+                    }];
+                    if let Err(output_error) = print_diagnostics(&diagnostics, true) {
+                        eprintln!("failed to serialize style diagnostics: {output_error:#}");
+                    }
+                }
+                2
+            };
+            process::exit(exit_code);
         }
     }
 }
 
-/// Executes one CLI operation and returns whether it passed its checks.
+/// Executes one formatting operation and the shared mechanical rule gate.
+///
+/// # Parameters
+///
+/// * `cli` - Parsed project, output and operation options.
+///
+/// # Returns
+///
+/// Returns whether completed mechanical checks have no proved violations.
+/// Semantic review signals do not fail the gate.
+///
+/// # Errors
+///
+/// Returns a typed gate failure or an operational error; neither is a passing
+/// result. The caller preserves typed diagnostic arrays and exit-code priority.
 fn run(cli: Cli) -> Result<bool> {
     let project = fs::canonicalize(&cli.project)?;
     match cli.command {
