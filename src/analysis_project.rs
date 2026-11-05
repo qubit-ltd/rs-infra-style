@@ -323,6 +323,18 @@ pub(crate) fn source_role(project: &Path, path: &str) -> (bool, bool) {
         .strip_prefix(root.strip_prefix(project).unwrap_or(Path::new("")))
         .unwrap_or(Path::new(path));
     let relative = relative.to_string_lossy().replace('\\', "/");
+    // Cargo fuzz targets are binaries, but their APIs are test harness code.
+    // Apply the role exclusion before explicit target paths can mark them as production.
+    let fuzz_package = manifest
+        .as_ref()
+        .and_then(|value| value.get("package"))
+        .and_then(|value| value.get("metadata"))
+        .and_then(|value| value.get("cargo-fuzz"))
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false);
+    if fuzz_package || path.split('/').any(|part| part == "fuzz") {
+        return (false, false);
+    }
     if let Some(manifest) = manifest.as_ref() {
         for target in ["test", "bench", "example", "bin"] {
             if let Some(entries) = manifest.get(target).and_then(toml::Value::as_array) {

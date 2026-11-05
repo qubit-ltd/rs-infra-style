@@ -640,3 +640,56 @@ fn test_formatter_environment_override_is_part_of_input_identity() {
     let explicit = run(Some("1.94.0"));
     assert_ne!(default["input_digest"], explicit["input_digest"]);
 }
+
+#[test]
+fn test_fuzz_binary_targets_do_not_receive_production_doc_checks() {
+    let root = project();
+    for (package, source, metadata) in [
+        ("fuzz", "fuzz_targets/input.rs", ""),
+        (
+            "property-harness",
+            "src/main.rs",
+            "[package.metadata]\ncargo-fuzz = true\n",
+        ),
+    ] {
+        put(
+            root.path(),
+            &format!("{package}/{source}"),
+            "//! Fuzz harness.\nenum Input { Value(u8) }\n/// Checks input.\nfn check<T>(value: T) {}\n",
+        );
+        fs::write(root.path().join(format!("{package}/Cargo.toml")),
+            format!("[package]\nname = \"harness\"\nversion = \"0.1.0\"\n{metadata}\n[[bin]]\nname = \"input\"\npath = \"{source}\"\n")).unwrap();
+        let report = analyze(root.path(), &[format!("{package}/{source}")], None).unwrap();
+        for check in ["rustdoc-presence", "required-documentation-sections"] {
+            assert!(
+                !report.diagnostics.iter().any(|d| d.check_id == check),
+                "{package}: {check}"
+            );
+            assert!(
+                report
+                    .coverage
+                    .iter()
+                    .any(|c| c.check_id == check && c.status == "not_applicable")
+            );
+        }
+    }
+}
+
+#[test]
+fn test_production_binary_keeps_documentation_checks() {
+    let root = project();
+    put(
+        root.path(),
+        "code/main.rs",
+        "//! Application.\nenum Input { Value(u8) }\n/// Checks input.\nfn check(value: u8) {}\n",
+    );
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[[bin]]\nname = \"app\"\npath = \"code/main.rs\"\n",
+    )
+    .unwrap();
+    let report = analyze(root.path(), &["code/main.rs".into()], None).unwrap();
+    for check in ["rustdoc-presence", "required-documentation-sections"] {
+        assert!(report.diagnostics.iter().any(|d| d.check_id == check), "{check}");
+    }
+}
