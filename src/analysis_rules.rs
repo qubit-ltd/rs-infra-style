@@ -24,6 +24,22 @@ use crate::style_exceptions::ExceptionConfig;
 // Holds source-local traversal and literal-span implementation details.
 mod internal;
 
+/// Reports whether TEST-003 governs this project-relative source path.
+///
+/// Cargo test roles also describe private test modules; the naming rule only
+/// governs the root integration-test and crate-internal test trees.
+///
+/// # Parameters
+///
+/// * `path` - Source path relative to the analyzed project.
+///
+/// # Returns
+///
+/// Returns whether the path belongs to a test tree named in TEST-003.
+pub(crate) fn test_naming_scope(path: &str) -> bool {
+    path.starts_with("tests/") || path.starts_with("src/tests/")
+}
+
 /// Analyzes local syntax without expanding macros or guessing name resolution.
 #[cfg(test)]
 pub(crate) fn inspect(path: &str, source: &str, ast: &syn::File, exceptions: &ExceptionConfig) -> Vec<Finding> {
@@ -101,7 +117,7 @@ pub(crate) fn inspect_with_context(
         types: Vec::new(),
         conditional: has_cfg(&ast.attrs),
     };
-    if test_tree && !exceptions.allows("test-file-name", path) {
+    if test_tree && test_naming_scope(path) && !exceptions.allows("test-file-name", path) {
         let concrete_tests = concrete_test_items(&ast.items);
         let name = Path::new(path).file_name().and_then(|x| x.to_str()).unwrap_or("");
         if !matches!(name, "mod.rs" | "main.rs") && !name.ends_with("_tests.rs") {

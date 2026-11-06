@@ -645,7 +645,11 @@ fn record_coverage(path: &str, parsed: &BTreeMap<String, syn::File>, role: (bool
         let (_, applicable_test) = role;
         let status = if !blocked && !excluded && unexpanded && *rule == "TEST-004" {
             "needs_semantic_review"
-        } else if !blocked && !excluded && matches!(*rule, "TEST-003" | "TEST-004") && !applicable_test {
+        } else if !blocked
+            && !excluded
+            && (matches!(*rule, "TEST-003" | "TEST-004") && !applicable_test
+                || *rule == "TEST-003" && !crate::analysis_rules::test_naming_scope(path))
+        {
             "not_applicable"
         } else {
             status
@@ -696,7 +700,7 @@ fn record_coverage(path: &str, parsed: &BTreeMap<String, syn::File>, role: (bool
         ("DOC-003", "required-documentation-sections", "production"),
         ("DOC-003", "public-type-examples", "semantic"),
         ("TEST-002", "test-function-name", "all"),
-        ("TEST-003", "test-file-name", "test"),
+        ("TEST-003", "test-file-name", "test-naming"),
         ("TEST-004", "test-source-redirection", "test"),
         ("ATTR-001", "trait-inline-without-body", "all"),
         ("ATTR-001", "double-must-use-self", "production"),
@@ -723,7 +727,11 @@ fn record_coverage(path: &str, parsed: &BTreeMap<String, syn::File>, role: (bool
             .collect();
         let status = if blocked {
             "blocked"
-        } else if excluded || (*scope == "production" && !production) || (*scope == "test" && !tests) {
+        } else if excluded
+            || (*scope == "production" && !production)
+            || (*scope == "test" && !tests)
+            || (*scope == "test-naming" && (!tests || !crate::analysis_rules::test_naming_scope(path)))
+        {
             "not_applicable"
         } else if findings.iter().any(|finding| finding.severity == "error") {
             "fail"

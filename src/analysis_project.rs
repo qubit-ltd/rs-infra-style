@@ -324,7 +324,8 @@ pub(crate) fn source_role(project: &Path, path: &str) -> (bool, bool) {
         .unwrap_or(Path::new(path));
     let relative = relative.to_string_lossy().replace('\\', "/");
     // Cargo fuzz targets are binaries, but their APIs are test harness code.
-    // Apply the role exclusion before explicit target paths can mark them as production.
+    // Apply the role exclusion before explicit target paths can mark them as
+    // production.
     let fuzz_package = manifest
         .as_ref()
         .and_then(|value| value.get("package"))
@@ -332,6 +333,13 @@ pub(crate) fn source_role(project: &Path, path: &str) -> (bool, bool) {
         .and_then(|value| value.get("cargo-fuzz"))
         .and_then(toml::Value::as_bool)
         .unwrap_or(false);
+    // Target kinds describe compilation, while normative source trees describe
+    // style roles. A harness package must not become production documentation
+    // scope merely because its Cargo entry is a binary or library.
+    let test_tree = path.starts_with("tests/") || path.starts_with("src/tests/");
+    if test_tree || path.starts_with("benches/") || path.starts_with("examples/") {
+        return (false, test_tree);
+    }
     if fuzz_package || path.split('/').any(|part| part == "fuzz") {
         return (false, false);
     }
@@ -544,7 +552,11 @@ pub(crate) fn inspect(
         let Some(ast) = parsed.get(path) else { continue };
         let Some(source) = sources.get(path) else { continue };
         let (production, tests) = roles.get(path).copied().unwrap_or((false, false));
-        if tests && Path::new(path).file_name().is_some_and(|name| name == "main.rs") && !target_root(project, path) {
+        if tests
+            && crate::analysis_rules::test_naming_scope(path)
+            && Path::new(path).file_name().is_some_and(|name| name == "main.rs")
+            && !target_root(project, path)
+        {
             report.diagnostics.push(finding(path,"TEST-003","test-file-name",1,"The main.rs naming exception requires a discovered Cargo test target entry",format!("{path} is not a conventional or explicitly registered target root; confirm its Cargo discovery before accepting the filename"),"info"));
         }
         if production {

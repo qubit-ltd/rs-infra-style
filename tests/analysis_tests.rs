@@ -693,3 +693,81 @@ fn test_production_binary_keeps_documentation_checks() {
         assert!(report.diagnostics.iter().any(|d| d.check_id == check), "{check}");
     }
 }
+
+#[test]
+fn test_external_inline_test_module_keeps_role_without_root_test_naming_policy() {
+    let root = project();
+    put(root.path(), "src/lib.rs", "//! Library.\n#[cfg(test)]\nmod tests;\n");
+    put(root.path(), "src/tests.rs", "#[test]\nfn test_value() {}\n");
+    let report = analyze(root.path(), &["src/lib.rs".into(), "src/tests.rs".into()], None).unwrap();
+    assert!(
+        !report.diagnostics.iter().any(|d| d.rule_id == "TEST-003"),
+        "{:?}",
+        report.diagnostics
+    );
+    assert!(!report.diagnostics.iter().any(|d| d.check_id == "rustdoc-presence"));
+}
+
+#[test]
+fn test_nested_fixture_binary_is_not_production_documentation_scope() {
+    let root = project();
+    put(root.path(), "tests/support/fixture/main.rs", "fn main() {}\n");
+    fs::write(root.path().join("tests/support/fixture/Cargo.toml"),
+        "[package]\nname=\"fixture\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[[bin]]\nname=\"fixture\"\npath=\"main.rs\"\n").unwrap();
+    let report = analyze(root.path(), &["tests/support/fixture/main.rs".into()], None).unwrap();
+    assert!(
+        !report.diagnostics.iter().any(|d| d.check_id == "rustdoc-presence"),
+        "{:?}",
+        report.diagnostics
+    );
+    assert!(
+        report
+            .coverage
+            .iter()
+            .any(|c| c.check_id == "rustdoc-presence" && c.status == "not_applicable")
+    );
+}
+
+#[test]
+fn test_nested_private_test_files_keep_out_of_scope_naming_coverage() {
+    for (owner, tests) in [
+        ("src/async_progress.rs", "src/async_progress/tests.rs"),
+        ("src/internal/operation_gate.rs", "src/internal/operation_gate/tests.rs"),
+    ] {
+        let root = project();
+        put(root.path(), owner, "#[cfg(test)]\nmod tests;\n");
+        put(root.path(), tests, "#[test]\nfn test_private_contract() {}\n");
+        let report = analyze(root.path(), &[owner.into(), tests.into()], None).unwrap();
+        assert!(
+            !report.diagnostics.iter().any(|d| d.rule_id == "TEST-003"),
+            "{tests}: {:?}",
+            report.diagnostics
+        );
+        assert!(report.coverage.iter().any(|c| c.path == tests
+            && c.rule_id == "TEST-003"
+            && c.check_id == "test-file-name"
+            && c.status == "not_applicable"));
+    }
+}
+
+#[test]
+fn test_nonproduction_binary_targets_respect_source_tree_boundaries() {
+    for directory in [
+        "tests/harness",
+        "src/tests/harness",
+        "benches/harness",
+        "examples/harness",
+    ] {
+        let root = project();
+        let source = format!("{directory}/main.rs");
+        put(root.path(), &source, "fn main() {}\n");
+        fs::write(root.path().join(format!("{directory}/Cargo.toml")),
+            "[package]\nname=\"harness\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[[bin]]\nname=\"harness\"\npath=\"main.rs\"\n").unwrap();
+        let report = analyze(root.path(), std::slice::from_ref(&source), None).unwrap();
+        assert!(
+            !report.diagnostics.iter().any(|d| d.check_id == "rustdoc-presence"),
+            "{source}: {:?}",
+            report.diagnostics
+        );
+    }
+}
