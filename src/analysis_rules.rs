@@ -637,6 +637,16 @@ mod tests {
     }
 
     #[test]
+    fn test_doc_hidden_is_an_attribute_not_rustdoc_text() {
+        let valid = "/// Describes the item.\n#[cfg(coverage)]\n#[doc(hidden)]\nfn example() {}";
+        assert!(!has(&findings("src/a.rs", valid), "documentation-attribute-order"));
+        let invalid = "#[doc(hidden)]\n/// Describes the item.\nfn example() {}";
+        assert!(has(&findings("src/a.rs", invalid), "documentation-attribute-order"));
+        let explicit = "#[inline]\n#[doc = \"Description\"]\nfn example() {}";
+        assert!(has(&findings("src/a.rs", explicit), "documentation-attribute-order"));
+    }
+
+    #[test]
     fn test_validates_empty_bodies_and_import_groups() {
         assert!(!has(
             &findings("src/a.rs", "struct A {\n    // empty\n}"),

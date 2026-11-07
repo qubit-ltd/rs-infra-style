@@ -134,7 +134,7 @@ impl Inspector<'_> {
         }
         let mut seen_non_doc = false;
         for attr in attrs {
-            if attr.path().is_ident("doc") {
+            if attr.path().is_ident("doc") && matches!(&attr.meta, Meta::NameValue(_)) {
                 if seen_non_doc {
                     self.issue(
                         "DOC-003",
