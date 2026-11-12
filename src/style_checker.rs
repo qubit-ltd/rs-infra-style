@@ -150,7 +150,7 @@ pub fn fix_project(project: &Path, source_dir: Option<&Path>, test_dir: Option<&
                 false,
                 &config,
                 toolchain.as_deref()
-            ))
+            )?)
         );
         return Ok(());
     }

@@ -115,7 +115,7 @@ pub(crate) fn format(project: &Path, check_only: bool) -> Result<()> {
         check_only,
         &config,
         toolchain.as_deref(),
-    )];
+    )?];
     let fuzz = project.join("fuzz/Cargo.toml");
     if fuzz.is_file() {
         commands.push(style_formatter::cargo_fuzz_fmt_command(

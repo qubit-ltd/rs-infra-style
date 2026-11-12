@@ -190,10 +190,11 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
     let bin = project.path().join("bin");
     fs::create_dir(&bin).expect("fake cargo directory");
     let cargo = bin.join("cargo");
-    // Stop at the formatter boundary, before style's separate metadata call.
+    // Stop after recording the formatter invocation; provide workspace metadata
+    // below.
     fs::write(
         &cargo,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FMT_ARGUMENTS\"\nexit 42\n",
+        "#!/bin/sh\nif [ \"$1\" = metadata ]; then printf '{\"packages\":[{\"name\":\"formatter-fixture\"},{\"name\":\"second-member\"}]}\\n'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$FMT_ARGUMENTS\"\nexit 42\n",
     )
     .expect("fake cargo");
     fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).expect("executable cargo");
@@ -218,6 +219,7 @@ fn test_formatter_forwards_toolchain_and_config_for_both_modes() {
             }
             expected.extend(["fmt", "--manifest-path"]);
             expected.push(manifest_path.to_str().expect("manifest path"));
+            expected.extend(["--package", "formatter-fixture", "--package", "second-member"]);
             expected.push("--");
             if operation == "check" {
                 expected.push("--check");
@@ -255,7 +257,7 @@ fn test_formatter_uses_project_toolchain_defaults_and_override() {
     fs::write(
         &cargo,
         r#"#!/bin/sh
-if [ "$1" = metadata ]; then printf '{"packages":[],"workspace_members":[]}\n'; exit 0; fi
+if [ "$1" = metadata ]; then printf '{"packages":[{"name":"formatter-fixture"}],"workspace_members":[]}\n'; exit 0; fi
 printf 'BEGIN\n' >> "$FMT_ARGUMENTS"
 printf '%s\n' "$@" >> "$FMT_ARGUMENTS"
 printf 'END\n' >> "$FMT_ARGUMENTS"
@@ -305,11 +307,13 @@ exit 0
             String::from_utf8_lossy(&result.stderr)
         );
         assert!(String::from_utf8_lossy(&result.stderr).contains("cannot execute configured rustfmt"));
-        let args = |manifest: &Path| {
+        let args = |manifest: &Path, package: Option<&str>| {
             let mut arguments = vec![expected_toolchain.to_owned(), "fmt".to_owned()];
+            arguments.extend(["--manifest-path".to_owned(), manifest.display().to_string()]);
+            if let Some(package) = package {
+                arguments.extend(["--package".to_owned(), package.to_owned()]);
+            }
             arguments.extend([
-                "--manifest-path".to_owned(),
-                manifest.display().to_string(),
                 "--".to_owned(),
                 "--check".to_owned(),
                 "--config-path".to_owned(),
@@ -319,7 +323,11 @@ exit 0
         };
         assert_eq!(
             fs::read_to_string(&output_path).expect("recorded arguments"),
-            format!("{}{}", args(&manifest_path), args(&fuzz_manifest))
+            format!(
+                "{}{}",
+                args(&manifest_path, Some("formatter-fixture")),
+                args(&fuzz_manifest, None)
+            )
         );
     }
 }
@@ -437,13 +445,12 @@ fn test_formatter_override_works_without_defaults() {
 }
 
 #[test]
-fn test_formatter_dry_run_shows_contract_without_running_cargo() {
+fn test_formatter_dry_run_shows_workspace_package_contract() {
     let project = formatter_project();
     let result = Command::new(env!("CARGO_BIN_EXE_rs-infra-style"))
         .arg("--project")
         .arg(project.path())
         .args(["fix", "--dry-run"])
-        .env("PATH", project.path())
         .env("RS_INFRA_STYLE_TOOLCHAIN", "nightly-2026-06-05")
         .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
         .output()
@@ -453,7 +460,7 @@ fn test_formatter_dry_run_shows_contract_without_running_cargo() {
         String::from_utf8(result.stdout).expect("command text"),
         format!(
             concat!(
-                "cargo +nightly-2026-06-05 fmt --manifest-path {}/Cargo.toml ",
+                "cargo +nightly-2026-06-05 fmt --manifest-path {}/Cargo.toml --package formatter-fixture ",
                 "-- --config-path {}/.infra/style/rustfmt.toml\n",
                 "✅ Rust style operation completed successfully.\n",
             ),

@@ -91,7 +91,8 @@ pub(crate) fn cargo_fmt_command(
     check_only: bool,
     config: &Path,
     toolchain: Option<&std::ffi::OsStr>,
-) -> Command {
+) -> Result<Command> {
+    let package_names = workspace_package_names(project)?;
     let mut command = Command::new("cargo");
     if let Some(toolchain) = toolchain {
         let mut argument = std::ffi::OsString::from("+");
@@ -100,12 +101,59 @@ pub(crate) fn cargo_fmt_command(
     }
     command.args(["fmt", "--manifest-path"]);
     command.arg(project.join("Cargo.toml"));
+    for package_name in package_names {
+        command.args(["--package", &package_name]);
+    }
     command.arg("--");
     if check_only {
         command.arg("--check");
     }
     command.arg("--config-path").arg(config);
-    command
+    Ok(command)
+}
+
+/// Lists the workspace packages without including local path dependencies.
+///
+/// Cargo fmt needs an explicit package selection for virtual workspace roots.
+/// Selecting each workspace package also avoids formatting read-only path
+/// dependencies as `cargo fmt --all` would.
+///
+/// # Parameters
+///
+/// * `project` - Project root containing the Cargo manifest.
+fn workspace_package_names(project: &Path) -> Result<Vec<String>> {
+    let manifest = project.join("Cargo.toml");
+    let output = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1", "--manifest-path"])
+        .arg(&manifest)
+        .current_dir(project)
+        .output()
+        .with_context(|| format!("failed to run cargo metadata for {}", manifest.display()))?;
+    if !output.status.success() {
+        bail!(
+            "cargo metadata failed for {}: {}",
+            manifest.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .with_context(|| format!("failed to parse cargo metadata for {}", manifest.display()))?;
+    let packages = metadata
+        .get("packages")
+        .and_then(serde_json::Value::as_array)
+        .context("cargo metadata omitted its packages array")?;
+    let names = packages
+        .iter()
+        .filter_map(|package| package.get("name").and_then(serde_json::Value::as_str))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if names.is_empty() {
+        bail!(
+            "cargo metadata returned no workspace packages for {}",
+            manifest.display()
+        );
+    }
+    Ok(names)
 }
 
 /// Builds the legacy second formatter invocation for a standalone fuzz crate.
