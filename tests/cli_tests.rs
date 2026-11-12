@@ -455,7 +455,7 @@ fn test_formatter_dry_run_shows_workspace_package_contract() {
         .env_remove("RS_INFRA_STYLE_RUSTFMT_CONFIG")
         .output()
         .expect("dry run");
-    assert!(result.status.success(), "dry run must not invoke cargo");
+    assert!(result.status.success(), "dry run must not invoke cargo fmt");
     assert_eq!(
         String::from_utf8(result.stdout).expect("command text"),
         format!(
