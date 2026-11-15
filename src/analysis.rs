@@ -57,7 +57,10 @@ pub const RULE_IDS: &[&str] = &[
 ///
 /// * `bytes` - Exact input bytes whose identity is bound to the report.
 pub(crate) fn digest(bytes: impl AsRef<[u8]>) -> String {
-    format!("{:x}", Sha256::digest(bytes.as_ref()))
+    Sha256::digest(bytes.as_ref())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Returns the authority digest compiled into this analyzer.
