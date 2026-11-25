@@ -2,7 +2,7 @@
 
 本目录是 Rust 开发、源码风格审查和机械门禁的唯一事实源。
 权威维护仓库为 [qubit-ltd/rs-infra-style](https://github.com/qubit-ltd/rs-infra-style/tree/main/doc/style-standard)，
-技能与审查脚本每次使用 GitHub `main` 最新文档，不再从技能同步规范。
+正式审核使用 GitHub `main` 最新文档。日常开发可使用已验证的限时缓存。
 
 ## 阅读顺序
 
@@ -11,6 +11,7 @@
 | [编码规范](rust-coding-standard.md) | 19 个稳定规则 ID、组织、导入、Rustdoc、测试结构、属性、复杂度、README 与风格修正验证 |
 | [Rust 文件头](rust-file-header.md) | DOC-001 的完整七行模板与年份保留/修复规则 |
 | [双语 README](readme-structure.md) | README-001 的元数据、徽章与末尾章节模板 |
+| [日常开发约定](development-conventions.md) | 参数、错误、并发与日常行为验证 |
 | [开发验证](development-validation.md) | 开发验收的测试、benchmark、fuzz、Clippy、CI 边界 |
 | [机械门禁边界](alignment-design.md) | 确定性诊断、人工审查、错误与通过的含义 |
 | [远程规范消费协议](consumption.md) | main 查询、完整缓存、版本固定与恢复失效规则 |
